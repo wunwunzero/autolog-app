@@ -207,6 +207,23 @@ function setTab(t) {
   $('tab-review').classList.toggle('on', t === 'review');
 }
 
+function showSetup(message) {
+  localStorage.removeItem(CFG_KEY);
+  $('app').classList.add('hidden');
+  $('nav').classList.add('hidden');
+  $('setup').classList.remove('hidden');
+  if (!showSetup._wired) {
+    showSetup._wired = true;
+    $('connectBtn').addEventListener('click', () => {
+      const parsed = parseConnect($('connect').value);
+      if (!parsed) return toast('That link is missing the address or key');
+      localStorage.setItem(CFG_KEY, JSON.stringify(parsed));
+      location.reload();
+    });
+  }
+  if (message) toast(message);
+}
+
 async function refresh() {
   try {
     data = await fetchData();
@@ -215,6 +232,11 @@ async function refresh() {
     renderReview();
     updateBadge();
   } catch (err) {
+    // A rejected key never fixes itself: reopen setup so the link can be re-pasted.
+    if (/refused/i.test(err.message)) {
+      showSetup('Key rejected — paste your dashboard link again');
+      return;
+    }
     toast('Could not load: ' + err.message);
   }
 }
@@ -223,13 +245,7 @@ function boot() {
   const demo = new URLSearchParams(location.search).get('demo');
   try { cfg = JSON.parse(localStorage.getItem(CFG_KEY)); } catch (e) { cfg = null; }
   if (!cfg && !demo) {
-    $('setup').classList.remove('hidden');
-    $('connectBtn').addEventListener('click', () => {
-      const parsed = parseConnect($('connect').value);
-      if (!parsed) return toast('That link is missing the address or key');
-      localStorage.setItem(CFG_KEY, JSON.stringify(parsed));
-      location.reload();
-    });
+    showSetup();
     return;
   }
   $('app').classList.remove('hidden');
