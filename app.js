@@ -249,6 +249,13 @@ function boot() {
     localStorage.removeItem(CFG_KEY);
     history.replaceState(null, '', location.pathname);
   }
+  // Tap-to-connect: …/autolog-app/#connect=<url-encoded dashboard link>, sent by the
+  // backend's emailDashLink(). Configures the app in one tap, no copying.
+  if (location.hash.indexOf('#connect=') === 0) {
+    const parsed = parseConnect(decodeURIComponent(location.hash.slice(9)));
+    if (parsed) localStorage.setItem(CFG_KEY, JSON.stringify(parsed));
+    history.replaceState(null, '', location.pathname);
+  }
   const demo = params.get('demo');
   try { cfg = JSON.parse(localStorage.getItem(CFG_KEY)); } catch (e) { cfg = null; }
   if (!cfg && !demo) {
