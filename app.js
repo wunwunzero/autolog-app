@@ -46,13 +46,23 @@ function toast(msg) {
 function parseConnect(s) {
   s = String(s || '').trim();
   // Accept every shape the user might paste: the raw dash link, the emailed tap-link
-  // (…/autolog-app/#connect=<encoded>), or a bare URL-encoded blob.
-  const frag = s.match(/#connect=(.+)$/);
-  if (frag) { try { s = decodeURIComponent(frag[1]); } catch (e) { /* keep original */ } }
-  else if (/^https?%3A/i.test(s)) { try { s = decodeURIComponent(s); } catch (e) { /* keep original */ } }
-  const url = (s.match(/https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec/) || [])[0];
-  const key = (s.match(/[?&]key=([\w-]+)/) || [])[1];
-  return url && key ? { url, key } : null;
+  // (…/autolog-app/#connect=<encoded>), a Gmail-wrapped copy (google.com/url?q=<encoded>,
+  // often double-encoded), or a bare encoded blob. Peel layers until the address and
+  // key appear or decoding stops making progress.
+  for (let i = 0; i < 5; i++) {
+    const frag = s.match(/#connect=(.+)$/);
+    if (frag) {
+      try { s = decodeURIComponent(frag[1]); continue; } catch (e) { /* fall through */ }
+    }
+    const url = (s.match(/https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec/) || [])[0];
+    const key = (s.match(/[?&]key=([\w-]+)/) || [])[1];
+    if (url && key) return { url, key };
+    let decoded;
+    try { decoded = decodeURIComponent(s); } catch (e) { break; }
+    if (decoded === s) break;
+    s = decoded;
+  }
+  return null;
 }
 
 async function fetchData() {
