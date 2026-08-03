@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Autolog">
+<meta name="theme-color" content="#000000">
+<title>Autolog</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-180.png">
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; background: #000; color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased; }
+  body { padding: calc(14px + env(safe-area-inset-top)) 16px calc(86px + env(safe-area-inset-bottom)); }
+  .muted { color: #98989f; }
+  .card { background: #1c1c1e; border-radius: 18px; padding: 16px 16px 17px; margin-top: 14px; }
+  .card h3 { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .7px;
+    text-transform: uppercase; color: #98989f; }
+  .pill { border-radius: 100px; padding: 4px 11px; font-size: 12px; font-weight: 600; }
+  .pill.bad { background: rgba(255,69,58,.15); color: #ff453a; }
+  .pill.good { background: rgba(48,209,88,.15); color: #30d158; }
+  .barrow { margin-top: 13px; }
+  .barrow .top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .barrow .name { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .barrow .amt { font-size: 12px; color: #98989f; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .track { background: #2c2c2e; border-radius: 3px; height: 6px; margin-top: 6px; overflow: hidden; }
+  .fill { height: 6px; border-radius: 3px; }
+  .txn { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 0 10px; border-top: .5px solid #2c2c2e; }
+  .txn:first-of-type { border-top: 0; padding-top: 14px; }
+  .txn .m { font-size: 15px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .txn .sub { font-size: 12px; color: #98989f; margin-top: 1px; }
+  .txn .val { font-size: 15px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .txn .val.in { color: #30d158; }
+  .txn.tappable:active { opacity: .6; }
+  nav { position: fixed; left: 0; right: 0; bottom: 0; display: flex;
+    background: rgba(18,18,20,.92); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
+    border-top: .5px solid #2c2c2e; padding: 10px 0 calc(10px + env(safe-area-inset-bottom)); }
+  nav button { flex: 1; background: none; border: 0; color: #98989f; font-size: 12px; font-weight: 600;
+    display: flex; flex-direction: column; align-items: center; gap: 3px; font-family: inherit; }
+  nav button.on { color: #0a84ff; }
+  nav .ico { font-size: 21px; line-height: 1; }
+  nav .badge { position: absolute; transform: translate(14px, -4px); background: #ff453a; color: #fff;
+    border-radius: 100px; font-size: 10px; font-weight: 700; padding: 1px 5px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .chips button { background: #2c2c2e; border: 0; color: #fff; border-radius: 100px; padding: 9px 15px;
+    font-size: 14px; font-weight: 600; font-family: inherit; }
+  .chips button:active { background: #0a84ff; }
+  #sheet { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: flex-end; z-index: 30; }
+  #sheet .inner { background: #1c1c1e; border-radius: 20px 20px 0 0; width: 100%;
+    padding: 18px 16px calc(24px + env(safe-area-inset-bottom)); }
+  #toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(100px + env(safe-area-inset-bottom));
+    background: #2c2c2e; color: #fff; border-radius: 100px; padding: 9px 18px; font-size: 13px; font-weight: 600;
+    z-index: 40; transition: opacity .3s; opacity: 0; pointer-events: none; max-width: 88vw; }
+  input[type=text] { width: 100%; background: #1c1c1e; color: #fff; border: .5px solid #3a3a3c;
+    border-radius: 12px; padding: 13px 14px; font-size: 15px; font-family: inherit; }
+  .btn { width: 100%; background: #0a84ff; color: #fff; border: 0; border-radius: 12px; padding: 14px;
+    font-size: 16px; font-weight: 700; margin-top: 14px; font-family: inherit; }
+  .btn:disabled { opacity: .4; }
+  .hidden { display: none !important; }
+  header { display: flex; justify-content: space-between; align-items: center; }
+</style>
+</head>
+<body>
+  <div id="setup" class="hidden">
+    <div style="font-size:34px;font-weight:800;margin:26px 0 4px">Autolog</div>
+    <div class="muted" style="font-size:15px;line-height:1.5">Paste your dashboard link (the one that
+      opens the old dark dashboard &mdash; it contains the address and your view key). It is stored
+      only on this phone.</div>
+    <div style="margin-top:20px"><input type="text" id="connect" placeholder="https://script.google.com/macros/s/…/exec?view=dash&key=…" autocomplete="off"></div>
+    <button class="btn" id="connectBtn">Connect</button>
+  </div>
+
+  <div id="app" class="hidden">
+    <header>
+      <div id="month" style="font-size:13px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:#98989f"></div>
+      <span id="statusPill" class="pill good">all clear</span>
+    </header>
+    <div id="view-overview"></div>
+    <div id="view-review" class="hidden"></div>
+  </div>
+
+  <nav id="nav" class="hidden">
+    <button id="tab-overview" class="on"><span class="ico">◉</span>Overview</button>
+    <button id="tab-review" style="position:relative"><span class="ico">☑︎</span>Review<span id="badge" class="badge hidden"></span></button>
+    <button id="tab-refresh"><span class="ico">⟳</span>Refresh</button>
+  </nav>
+
+  <div id="sheet" class="hidden"></div>
+  <div id="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>
