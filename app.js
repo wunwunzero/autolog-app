@@ -44,6 +44,12 @@ function toast(msg) {
 }
 
 function parseConnect(s) {
+  s = String(s || '').trim();
+  // Accept every shape the user might paste: the raw dash link, the emailed tap-link
+  // (…/autolog-app/#connect=<encoded>), or a bare URL-encoded blob.
+  const frag = s.match(/#connect=(.+)$/);
+  if (frag) { try { s = decodeURIComponent(frag[1]); } catch (e) { /* keep original */ } }
+  else if (/^https?%3A/i.test(s)) { try { s = decodeURIComponent(s); } catch (e) { /* keep original */ } }
   const url = (s.match(/https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec/) || [])[0];
   const key = (s.match(/[?&]key=([\w-]+)/) || [])[1];
   return url && key ? { url, key } : null;
