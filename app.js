@@ -6,6 +6,10 @@
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
+const APP_VERSION = 8; // keep in step with index.html's app.js?v=
+// The backend address is fixed and not secret (auth lives in the key), so connecting
+// only truly requires the key itself.
+const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
 const BASE_CATS = ['Food', 'Groceries', 'Transport', 'Fuel', 'Shopping', 'Health', 'Subscriptions', 'TRANSFER', 'REFUND'];
 
 let cfg = null;
@@ -49,6 +53,8 @@ function parseConnect(s) {
   // (…/autolog-app/#connect=<encoded>), a Gmail-wrapped copy (google.com/url?q=<encoded>,
   // often double-encoded), or a bare encoded blob. Peel layers until the address and
   // key appear or decoding stops making progress.
+  // Simplest of all: just the key, typed by hand (12-ish chars from the Config tab).
+  if (/^[A-Za-z0-9-]{8,24}$/.test(s)) return { url: DEFAULT_EXEC_URL, key: s };
   for (let i = 0; i < 5; i++) {
     const frag = s.match(/#connect=(.+)$/);
     if (frag) {
@@ -232,7 +238,7 @@ function showSetup(message) {
     showSetup._wired = true;
     $('connectBtn').addEventListener('click', () => {
       const parsed = parseConnect($('connect').value);
-      if (!parsed) return toast('That link is missing the address or key');
+      if (!parsed) return toast('Couldn’t read that (app v' + APP_VERSION + '). Try just typing your 12-character key.');
       localStorage.setItem(CFG_KEY, JSON.stringify(parsed));
       location.reload();
     });

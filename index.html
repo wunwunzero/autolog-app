@@ -68,11 +68,12 @@
 <body>
   <div id="setup" class="hidden">
     <div style="font-size:34px;font-weight:800;margin:26px 0 4px">Autolog</div>
-    <div class="muted" style="font-size:15px;line-height:1.5">Paste your connect link &mdash; either the
-      dashboard link or the link from the &ldquo;connect your phone app&rdquo; email (long-press it
-      there and Copy). It is stored only on this device.</div>
-    <div style="margin-top:20px"><input type="text" id="connect" placeholder="https://script.google.com/macros/s/…/exec?view=dash&key=…" autocomplete="off"></div>
+    <div class="muted" style="font-size:15px;line-height:1.5">Type your <b>12-character view key</b>
+      (sheet &rarr; Config tab &rarr; DASH_KEY row) &mdash; or paste any connect link, like the one from
+      the &ldquo;connect your phone app&rdquo; email. Stored only on this device.</div>
+    <div style="margin-top:20px"><input type="text" id="connect" placeholder="key or connect link" autocomplete="off" autocapitalize="none" autocorrect="off"></div>
     <button class="btn" id="connectBtn">Connect</button>
+    <div class="muted" style="text-align:center;font-size:12px;margin-top:18px">Autolog app v8</div>
   </div>
 
   <div id="app" class="hidden">
@@ -93,6 +94,6 @@
   <div id="sheet" class="hidden"></div>
   <div id="toast"></div>
   <!-- bump ?v= on every app.js change: Safari/PWA caches are sticky -->
-  <script src="app.js?v=7"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>
