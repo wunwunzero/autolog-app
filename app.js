@@ -138,14 +138,14 @@ function renderReview() {
     html = `<div class="card" style="text-align:center;padding:34px 16px">
       <div style="font-size:40px">🎉</div>
       <div style="font-size:17px;font-weight:700;margin-top:8px">Nothing to review</div>
-      <div class="muted" style="font-size:14px;margin-top:4px">Every transaction is categorised.</div></div>`;
+      <div class="muted" style="font-size:14px;margin-top:4px">Every transaction is categorised &mdash; all clear to sync to Actual Budget.</div></div>`;
   } else {
     html = `<div class="card"><h3>Needs a category (${data.reviewTotal})</h3>` +
       list.map((t, i) => `<div class="txn tappable" data-i="${i}"><div style="min-width:0">
         <div class="m">${esc(t.merchant || '(no merchant)')}</div>
         <div class="sub">${esc(t.date)} &middot; ${esc(t.source)}${t.category === 'REVIEW' ? ' &middot; REVIEW' : ''}</div></div>
         <div class="val">${t.amountMYR === null ? '—' : fmt(t.amountMYR)}</div></div>`).join('') +
-      '</div><div class="muted" style="font-size:13px;text-align:center;margin-top:14px">Tap a transaction to pick its category.</div>';
+      '</div><div class="muted" style="font-size:13px;text-align:center;margin-top:14px">Tap a transaction to pick its category.<br>These stay out of Actual Budget until categorised.</div>';
   }
   $('view-review').innerHTML = html;
   document.querySelectorAll('#view-review .tappable').forEach((el) => {
