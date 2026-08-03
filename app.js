@@ -242,7 +242,14 @@ async function refresh() {
 }
 
 function boot() {
-  const demo = new URLSearchParams(location.search).get('demo');
+  const params = new URLSearchParams(location.search);
+  // Guaranteed escape hatch (…/autolog-app/?reset=1): wipe the stored connection and
+  // start over, regardless of what state a cached version left behind.
+  if (params.get('reset')) {
+    localStorage.removeItem(CFG_KEY);
+    history.replaceState(null, '', location.pathname);
+  }
+  const demo = params.get('demo');
   try { cfg = JSON.parse(localStorage.getItem(CFG_KEY)); } catch (e) { cfg = null; }
   if (!cfg && !demo) {
     showSetup();
