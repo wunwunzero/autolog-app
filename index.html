@@ -12,6 +12,7 @@
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" href="icon-180.png">
 <style>
+  :root { color-scheme: dark; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; padding: 0; background: #000; color: #fff;
     font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
@@ -56,8 +57,11 @@
   #toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(100px + env(safe-area-inset-bottom));
     background: #2c2c2e; color: #fff; border-radius: 100px; padding: 9px 18px; font-size: 13px; font-weight: 600;
     z-index: 40; transition: opacity .3s; opacity: 0; pointer-events: none; max-width: 88vw; }
-  input[type=text] { width: 100%; background: #1c1c1e; color: #fff; border: .5px solid #3a3a3c;
-    border-radius: 12px; padding: 13px 14px; font-size: 15px; font-family: inherit; }
+  input[type=text], input[type=date], select { width: 100%; background: #1c1c1e; color: #fff;
+    border: .5px solid #3a3a3c; border-radius: 12px; padding: 13px 14px; font-size: 15px;
+    font-family: inherit; -webkit-appearance: none; appearance: none; }
+  #view-add input[type=text], #view-add input[type=date], #view-add select { background: #2c2c2e; border-color: #3a3a3c; }
+  .chips button.sel { background: #0a84ff; }
   .btn { width: 100%; background: #0a84ff; color: #fff; border: 0; border-radius: 12px; padding: 14px;
     font-size: 16px; font-weight: 700; margin-top: 14px; font-family: inherit; }
   .btn:disabled { opacity: .4; }
@@ -83,10 +87,30 @@
     </header>
     <div id="view-overview"></div>
     <div id="view-review" class="hidden"></div>
+    <div id="view-add" class="hidden">
+      <div class="card"><h3>Log a transaction</h3>
+        <div style="margin-top:14px"><input type="text" id="addMerchant" placeholder="Merchant" autocomplete="off"></div>
+        <div style="display:flex;gap:10px;margin-top:10px">
+          <input type="text" inputmode="decimal" id="addAmount" placeholder="Amount" style="flex:1" autocomplete="off">
+          <select id="addCurrency" style="width:104px">
+            <option selected>MYR</option><option>SGD</option><option>USD</option><option>THB</option>
+            <option>IDR</option><option>VND</option><option>EUR</option><option>GBP</option>
+            <option>JPY</option><option>AUD</option>
+          </select>
+        </div>
+        <div style="margin-top:10px"><input type="date" id="addDate"></div>
+        <div class="chips" id="addChips"></div>
+        <button class="btn" id="addSave">Log transaction</button>
+      </div>
+      <div class="muted" style="font-size:13px;text-align:center;margin-top:14px">
+        Same pipeline as Apple Pay taps &mdash; dedup, alerts and budgets included.<br>
+        No category picked? The rules decide, or it lands in Review.</div>
+    </div>
   </div>
 
   <nav id="nav" class="hidden">
     <button id="tab-overview" class="on"><span class="ico">◉</span>Overview</button>
+    <button id="tab-add"><span class="ico">＋</span>Add</button>
     <button id="tab-review" style="position:relative"><span class="ico">☑︎</span>Review<span id="badge" class="badge hidden"></span></button>
     <button id="tab-refresh"><span class="ico">⟳</span>Refresh</button>
   </nav>
@@ -94,6 +118,6 @@
   <div id="sheet" class="hidden"></div>
   <div id="toast"></div>
   <!-- bump ?v= on every app.js change: Safari/PWA caches are sticky -->
-  <script src="app.js?v=8"></script>
+  <script src="app.js?v=9"></script>
 </body>
 </html>

@@ -6,7 +6,7 @@
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
-const APP_VERSION = 8; // keep in step with index.html's app.js?v=
+const APP_VERSION = 9; // keep in step with index.html's app.js?v=
 // The backend address is fixed and not secret (auth lives in the key), so connecting
 // only truly requires the key itself.
 const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
@@ -77,6 +77,16 @@ async function fetchData() {
   const j = await res.json();
   if (!j.ok) throw new Error('Backend refused the key');
   return j;
+}
+
+async function quickAdd(fields) {
+  if (new URLSearchParams(location.search).get('demo')) return { ok: true, id: 'demo' };
+  const res = await fetch(cfg.url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // simple request: no CORS preflight
+    body: JSON.stringify({ action: 'quickadd', key: cfg.key, ...fields })
+  });
+  return res.json();
 }
 
 async function categorize(id, category) {
@@ -223,10 +233,63 @@ function updateBadge() {
 
 function setTab(t) {
   tab = t;
-  $('view-overview').classList.toggle('hidden', t !== 'overview');
-  $('view-review').classList.toggle('hidden', t !== 'review');
-  $('tab-overview').classList.toggle('on', t === 'overview');
-  $('tab-review').classList.toggle('on', t === 'review');
+  ['overview', 'review', 'add'].forEach((v) => {
+    $('view-' + v).classList.toggle('hidden', t !== v);
+    $('tab-' + v).classList.toggle('on', t === v);
+  });
+}
+
+// Category chips for the Add form: single-select toggle, no reserved categories
+// (a manual REFUND/TRANSFER would fight the netting logic).
+function fillAddChips() {
+  const cats = [...new Set([...((data && data.categories) || []), ...BASE_CATS])]
+    .filter((c) => c !== 'TRANSFER' && c !== 'REFUND');
+  const holder = $('addChips');
+  const selected = holder.querySelector('.sel')?.dataset.c;
+  holder.innerHTML = cats.map((c) => `<button type="button" data-c="${esc(c)}"${c === selected ? ' class="sel"' : ''}>${esc(c)}</button>`).join('');
+  holder.querySelectorAll('button').forEach((b) => {
+    b.addEventListener('click', () => {
+      const was = b.classList.contains('sel');
+      holder.querySelectorAll('button').forEach((x) => x.classList.remove('sel'));
+      if (!was) b.classList.add('sel'); // tap again to unselect = let the rules decide
+    });
+  });
+}
+
+function localToday() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+async function saveQuickAdd() {
+  const merchant = $('addMerchant').value.trim();
+  const amount = $('addAmount').value.trim().replace(',', '.');
+  if (!merchant) return toast('Give it a merchant name');
+  if (!(parseFloat(amount) > 0)) return toast('Amount must be more than 0');
+  const fields = { merchant, amount, currency: $('addCurrency').value };
+  const cat = $('addChips').querySelector('.sel')?.dataset.c;
+  if (cat) fields.category = cat;
+  // Only send a date when it isn't today, so "now" keeps its time of day (dedup ordering).
+  if ($('addDate').value && $('addDate').value !== localToday()) fields.date = $('addDate').value;
+  const btn = $('addSave');
+  btn.disabled = true;
+  btn.textContent = 'Logging…';
+  try {
+    const r = await quickAdd(fields);
+    if (!r.ok) throw new Error(r.error || 'rejected');
+    toast(`Logged ${fields.currency === 'MYR' ? fmt(parseFloat(amount)) : fields.currency + ' ' + amount} at ${merchant}${r.dedup ? ' (already logged)' : ''}`);
+    $('addMerchant').value = '';
+    $('addAmount').value = '';
+    $('addChips').querySelectorAll('button').forEach((x) => x.classList.remove('sel'));
+    $('addDate').value = localToday();
+    setTab('overview');
+    refresh();
+  } catch (err) {
+    toast('Failed: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Log transaction';
+  }
 }
 
 function showSetup(message) {
@@ -252,6 +315,7 @@ async function refresh() {
     $('month').textContent = data.month;
     renderOverview();
     renderReview();
+    fillAddChips();
     updateBadge();
   } catch (err) {
     // A rejected key never fixes itself: reopen setup so the link can be re-pasted.
@@ -288,7 +352,11 @@ function boot() {
   $('nav').classList.remove('hidden');
   $('tab-overview').addEventListener('click', () => setTab('overview'));
   $('tab-review').addEventListener('click', () => setTab('review'));
+  $('tab-add').addEventListener('click', () => setTab('add'));
   $('tab-refresh').addEventListener('click', () => { toast('Refreshing…'); refresh(); });
+  $('addDate').value = localToday();
+  $('addSave').addEventListener('click', saveQuickAdd);
+  fillAddChips();
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
   refresh();
 }
