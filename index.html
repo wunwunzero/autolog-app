@@ -17,7 +17,11 @@
   html, body { margin: 0; padding: 0; background: #000; color: #fff;
     font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased; }
-  body { padding: calc(14px + env(safe-area-inset-top)) 16px calc(86px + env(safe-area-inset-bottom)); }
+  body { padding: calc(14px + env(safe-area-inset-top)) 16px calc(86px + env(safe-area-inset-bottom));
+    /* Always minimally scrollable: iOS standalone keeps the viewport shrunk after the
+       keyboard closes until a scroll event fires - unscrollable pages could never heal,
+       leaving the fixed tab bar floating mid-screen. */
+    min-height: calc(100vh + 2px); min-height: calc(100dvh + 2px); }
   .muted { color: #98989f; }
   .card { background: #1c1c1e; border-radius: 18px; padding: 16px 16px 17px; margin-top: 14px; }
   .card h3 { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .7px;
@@ -121,6 +125,6 @@
   <div id="sheet" class="hidden"></div>
   <div id="toast"></div>
   <!-- bump ?v= on every app.js change: Safari/PWA caches are sticky -->
-  <script src="app.js?v=10"></script>
+  <script src="app.js?v=11"></script>
 </body>
 </html>

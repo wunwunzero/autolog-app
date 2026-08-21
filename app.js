@@ -6,7 +6,7 @@
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
-const APP_VERSION = 10; // keep in step with index.html's app.js?v=
+const APP_VERSION = 11; // keep in step with index.html's app.js?v=
 // The backend address is fixed and not secret (auth lives in the key), so connecting
 // only truly requires the key itself.
 const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
@@ -220,7 +220,15 @@ function openSheet(txn) {
   });
 }
 
-function closeSheet() { $('sheet').classList.add('hidden'); }
+function closeSheet() { $('sheet').classList.add('hidden'); healViewport(); }
+
+// iOS (especially standalone) keeps the visual viewport shrunk after the keyboard or a
+// prompt() closes, until a real scroll event fires - the fixed tab bar floats mid-screen
+// on pages too short to scroll. The body is kept 2px taller than the viewport so this
+// nudge always produces a genuine scroll and snaps the viewport back.
+function healViewport() {
+  setTimeout(() => { window.scrollTo(0, 1); window.scrollTo(0, 0); }, 80);
+}
 
 function updateBadge() {
   const n = data ? data.reviewTotal || 0 : 0;
@@ -237,6 +245,7 @@ function setTab(t) {
     $('view-' + v).classList.toggle('hidden', t !== v);
     $('tab-' + v).classList.toggle('on', t === v);
   });
+  healViewport();
 }
 
 // Category chips for the Add form: single-select toggle, no reserved categories
@@ -358,7 +367,17 @@ function boot() {
   $('addDate').value = localToday();
   $('addSave').addEventListener('click', saveQuickAdd);
   fillAddChips();
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { refresh(); healViewport(); } });
+  // Keyboard dismissal is the main viewport-shrinker: heal on every input blur, and on
+  // any visual-viewport resize settling (covers prompt(), rotation, keyboard).
+  document.addEventListener('focusout', healViewport);
+  if (window.visualViewport) {
+    let vvT;
+    window.visualViewport.addEventListener('resize', () => {
+      clearTimeout(vvT);
+      vvT = setTimeout(healViewport, 120);
+    });
+  }
   refresh();
 }
 
