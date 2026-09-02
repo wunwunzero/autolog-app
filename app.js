@@ -6,7 +6,7 @@
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
-const APP_VERSION = 12; // keep in step with index.html's app.js?v=
+const APP_VERSION = 13; // keep in step with index.html's app.js?v=
 // The backend address is fixed and not secret (auth lives in the key), so connecting
 // only truly requires the key itself.
 const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
@@ -272,13 +272,21 @@ function localToday() {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
+function addSaveLabel() {
+  return $('addPaidback').checked ? 'Log repayment' : 'Log transaction';
+}
+
 async function saveQuickAdd() {
   const merchant = $('addMerchant').value.trim();
   const amount = $('addAmount').value.trim().replace(',', '.');
+  const paidback = $('addPaidback').checked;
   if (!merchant) return toast('Give it a merchant name');
   if (!(parseFloat(amount) > 0)) return toast('Amount must be more than 0');
-  const fields = { merchant, amount, currency: $('addCurrency').value };
   const cat = $('addChips').querySelector('.sel')?.dataset.c;
+  // A repayment nets a specific envelope, so the category is not optional —
+  // the backend rejects category-less negatives too (they'd sync wrong).
+  if (paidback && !cat) return toast('Pick the envelope the repayment nets');
+  const fields = { merchant, amount: paidback ? '-' + amount : amount, currency: $('addCurrency').value };
   if (cat) fields.category = cat;
   // Only send a date when it isn't today, so "now" keeps its time of day (dedup ordering).
   if ($('addDate').value && $('addDate').value !== localToday()) fields.date = $('addDate').value;
@@ -288,18 +296,23 @@ async function saveQuickAdd() {
   try {
     const r = await quickAdd(fields);
     if (!r.ok) throw new Error(r.error || 'rejected');
-    toast(`Logged ${fields.currency === 'MYR' ? fmt(parseFloat(amount)) : fields.currency + ' ' + amount} at ${merchant}${r.dedup ? ' (already logged)' : ''}`);
+    const amtText = fields.currency === 'MYR' ? fmt(parseFloat(amount)) : fields.currency + ' ' + amount;
+    toast(paidback
+      ? `Paid back ${amtText} into ${cat}${r.dedup ? ' (already logged)' : ''}`
+      : `Logged ${amtText} at ${merchant}${r.dedup ? ' (already logged)' : ''}`);
     $('addMerchant').value = '';
     $('addAmount').value = '';
     $('addChips').querySelectorAll('button').forEach((x) => x.classList.remove('sel'));
     $('addDate').value = localToday();
+    $('addPaidback').checked = false;
+    $('addMerchant').placeholder = 'Merchant';
     setTab('overview');
     refresh();
   } catch (err) {
     toast('Failed: ' + err.message);
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Log transaction';
+    btn.textContent = addSaveLabel();
   }
 }
 
@@ -368,6 +381,10 @@ function boot() {
   $('tab-refresh').addEventListener('click', () => { toast('Refreshing…'); refresh(); });
   $('addDate').value = localToday();
   $('addSave').addEventListener('click', saveQuickAdd);
+  $('addPaidback').addEventListener('change', () => {
+    $('addSave').textContent = addSaveLabel();
+    $('addMerchant').placeholder = $('addPaidback').checked ? 'Repayment - Ali dinner' : 'Merchant';
+  });
   fillAddChips();
   document.addEventListener('visibilitychange', () => { if (!document.hidden) { refresh(); healViewport(); } });
   // Keyboard dismissal is the main viewport-shrinker: heal on every input blur, and on
