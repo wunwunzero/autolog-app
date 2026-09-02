@@ -6,7 +6,7 @@
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
-const APP_VERSION = 11; // keep in step with index.html's app.js?v=
+const APP_VERSION = 12; // keep in step with index.html's app.js?v=
 // The backend address is fixed and not secret (auth lives in the key), so connecting
 // only truly requires the key itself.
 const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
@@ -186,7 +186,9 @@ function renderReview() {
 }
 
 function openSheet(txn) {
-  const cats = [...new Set([...(data.categories || []), ...BASE_CATS])];
+  // Budget keys carry the full funded plan (mirrored daily from Actual), so a
+  // newly funded envelope becomes a chip before any row or rule uses it.
+  const cats = [...new Set([...(data.categories || []), ...Object.keys(data.budgets || {}), ...BASE_CATS])];
   const sheet = $('sheet');
   sheet.innerHTML = `<div class="inner">
     <div style="font-size:17px;font-weight:700">${esc(txn.merchant || '(no merchant)')}</div>
@@ -251,7 +253,7 @@ function setTab(t) {
 // Category chips for the Add form: single-select toggle, no reserved categories
 // (a manual REFUND/TRANSFER would fight the netting logic).
 function fillAddChips() {
-  const cats = [...new Set([...((data && data.categories) || []), ...BASE_CATS])]
+  const cats = [...new Set([...((data && data.categories) || []), ...Object.keys((data && data.budgets) || {}), ...BASE_CATS])]
     .filter((c) => c !== 'TRANSFER' && c !== 'REFUND');
   const holder = $('addChips');
   const selected = holder.querySelector('.sel')?.dataset.c;
