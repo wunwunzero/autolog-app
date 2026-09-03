@@ -6,7 +6,7 @@
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
-const APP_VERSION = 14; // keep in step with index.html's app.js?v=
+const APP_VERSION = 15; // keep in step with index.html's app.js?v=
 // The backend address is fixed and not secret (auth lives in the key), so connecting
 // only truly requires the key itself.
 const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
@@ -96,6 +96,33 @@ async function quickAdd(fields) {
   return res.json();
 }
 
+async function undoQuickAdd(id) {
+  if (new URLSearchParams(location.search).get('demo')) return { ok: true };
+  const res = await fetch(cfg.url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ action: 'undo_quickadd', key: cfg.key, id })
+  });
+  return res.json();
+}
+
+// Last quick-add, kept for the 15-minute undo window the backend enforces.
+// localStorage so it survives an app relaunch; wrapped because iOS can deny it.
+const UNDO_KEY = 'autolog.lastAdd';
+const UNDO_WINDOW_MS = 15 * 60 * 1000;
+function rememberLastAdd(id, text) {
+  try { localStorage.setItem(UNDO_KEY, JSON.stringify({ id, text, ts: Date.now() })); } catch (e) { /* per-viewer nicety only */ }
+}
+function pendingUndo() {
+  try {
+    const u = JSON.parse(localStorage.getItem(UNDO_KEY));
+    return u && u.id && Date.now() - u.ts < UNDO_WINDOW_MS ? u : null;
+  } catch (e) { return null; }
+}
+function clearLastAdd() {
+  try { localStorage.removeItem(UNDO_KEY); } catch (e) { /* ignore */ }
+}
+
 async function categorize(id, category) {
   if (new URLSearchParams(location.search).get('demo')) return { ok: true };
   const res = await fetch(cfg.url, {
@@ -128,6 +155,11 @@ function renderOverview() {
   const bCats = Object.keys(budgets);
   let html = `<div style="font-size:44px;font-weight:800;letter-spacing:-1px;margin-top:6px">${fmt(data.totalMYR)}</div>
     <div class="muted" style="font-size:13px;margin-top:2px">spent this month &middot; day ${data.dayOfMonth} of ${data.daysInMonth}</div>`;
+
+  const undo = pendingUndo();
+  if (undo) {
+    html += `<button class="btn" id="undoBtn" style="background:#2c2c2e;margin-top:14px">&#x21a9;&#xfe0e; Undo last add &mdash; ${esc(undo.text)}</button>`;
+  }
 
   if (bCats.length) {
     let capSum = 0, spent = 0;
@@ -181,6 +213,28 @@ function renderOverview() {
     }).join('') +
     `</div><div class="muted" style="text-align:center;margin-top:20px;font-size:12px">Updated ${esc(data.generatedAt || '')}</div>`;
   $('view-overview').innerHTML = html;
+
+  const undoBtn = $('undoBtn');
+  if (undoBtn) {
+    undoBtn.addEventListener('click', async () => {
+      const u = pendingUndo();
+      if (!u) { renderOverview(); return; }
+      undoBtn.disabled = true;
+      undoBtn.textContent = 'Removing…';
+      try {
+        const r = await undoQuickAdd(u.id);
+        if (!r.ok) throw new Error(r.error || 'rejected');
+        clearLastAdd();
+        toast('Removed — ' + u.text);
+        refresh();
+      } catch (err) {
+        // A closed window or vanished row means the pill is stale: drop it.
+        if (/window closed|not found|synced/.test(err.message)) clearLastAdd();
+        toast('Undo failed: ' + err.message);
+        renderOverview();
+      }
+    });
+  }
 }
 
 function renderReview() {
@@ -320,6 +374,7 @@ async function saveQuickAdd() {
     toast(paidback
       ? `Paid back ${amtText} into ${cat}${r.dedup ? ' (already logged)' : ''}`
       : `Logged ${amtText} at ${merchant}${r.dedup ? ' (already logged)' : ''}`);
+    if (r.id && !r.dedup) rememberLastAdd(r.id, `${paidback ? '+' : ''}${amtText} · ${merchant}`);
     $('addMerchant').value = '';
     $('addAmount').value = '';
     $('addChips').querySelectorAll('button').forEach((x) => x.classList.remove('sel'));
