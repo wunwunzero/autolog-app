@@ -6,7 +6,7 @@
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
-const APP_VERSION = 13; // keep in step with index.html's app.js?v=
+const APP_VERSION = 14; // keep in step with index.html's app.js?v=
 // The backend address is fixed and not secret (auth lives in the key), so connecting
 // only truly requires the key itself.
 const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
@@ -22,6 +22,7 @@ const DEMO = {
   byCat: { Food: 142.8, Groceries: 441.1, Transport: 42.6, Subscriptions: 54.9, Fuel: 80, Shopping: 129, Health: 59.1 },
   budgets: { Food: 600, Groceries: 450, Transport: 200, Subscriptions: 60, Fuel: 250 },
   categories: ['Food', 'Groceries', 'Transport', 'Fuel', 'Shopping', 'Health', 'Subscriptions'],
+  coverage: { tng: '2026-08-14', hsbc: '2026-08-16', rhb: null, alipay: '2026-08-15' },
   reviewTotal: 3,
   review: [
     { id: 'd1', date: '2026-08-15', merchant: 'MYSTERY SHOP 88', amountMYR: 42, category: 'Uncategorized', source: 'statement' },
@@ -36,6 +37,12 @@ const DEMO = {
 };
 
 const fmt = (v) => (v < 0 ? '-' : '') + 'RM' + Math.abs(v).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// '2026-08-28' -> '28 Aug 2026' (string-split, no Date parsing: avoids timezone drift)
+function fmtCoverageDate(iso) {
+  const p = String(iso).split('-');
+  return p.length === 3 ? Number(p[2]) + ' ' + (MONTHS[Number(p[1]) - 1] || p[1]) + ' ' + p[0] : iso;
+}
 const barColor = (r) => r >= 1 ? '#ff453a' : r >= 0.8 ? '#ff9f0a' : '#30d158';
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -150,6 +157,19 @@ function renderOverview() {
     html += `<div class="card"><h3>${bCats.length ? 'Other spending' : 'Spending'}</h3><div style="margin-top:2px">` +
       others.map((x) => barRow(x.c, fmt(x.s), Math.max(2, Math.round(x.s / max * 100)), '#0a84ff')).join('') +
       '</div></div>';
+  }
+
+  // Capture coverage: how far each statement channel is imported ("synced until").
+  // Older backends don't send `coverage` — hide the card entirely then.
+  if (data.coverage) {
+    const CHANNELS = [['tng', 'TNG eWallet'], ['hsbc', 'HSBC'], ['rhb', 'RHB Card'], ['alipay', 'Alipay']];
+    html += `<div class="card"><h3>Statements synced until</h3><div style="margin-top:4px">` +
+      CHANNELS.map(([k, label]) => {
+        const d = data.coverage[k];
+        return `<div class="txn"><div class="m">${label}</div>
+          <div class="val" style="font-weight:600;color:${d ? '#fff' : '#8e8e93'}">${d ? esc(fmtCoverageDate(d)) : 'no imports yet'}</div></div>`;
+      }).join('') +
+      `</div><div class="muted" style="font-size:12px;margin-top:8px">Newest imported transaction per source &mdash; spends after these dates arrive with your next screenshot/statement drop.</div></div>`;
   }
 
   html += `<div class="card"><h3>Recent</h3>` +
