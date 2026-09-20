@@ -6,7 +6,7 @@
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
-const APP_VERSION = 15; // keep in step with index.html's app.js?v=
+const APP_VERSION = 16; // keep in step with index.html's app.js?v=
 // The backend address is fixed and not secret (auth lives in the key), so connecting
 // only truly requires the key itself.
 const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
@@ -32,7 +32,9 @@ const DEMO = {
   recent: [
     { id: 'r1', date: '2026-08-18', merchant: 'BIG Pharmacy', amountMYR: 22.9, category: 'Health', source: 'applepay' },
     { id: 'r2', date: '2026-08-18', merchant: 'Starbucks KLIA2', amountMYR: 19.5, category: 'Food', source: 'applepay' },
-    { id: 'r3', date: '2026-08-12', merchant: 'Shopee MY', amountMYR: -35, category: 'REFUND', source: 'statement' }
+    { id: 'r3', date: '2026-08-12', merchant: 'Shopee MY', amountMYR: -35, category: 'REFUND', source: 'statement' },
+    { id: 'r4', date: '2026-08-10', merchant: 'Family transfer', amountMYR: 400, category: 'Family', source: 'manual' },
+    { id: 'r5', date: '2026-08-05', merchant: 'YES phone bill', amountMYR: 50, category: 'Phone & Internet', source: 'manual' }
   ]
 };
 
@@ -237,8 +239,15 @@ function renderOverview() {
   }
 }
 
+// Batch selection state for the Review tab: "Select" flips the list into
+// multi-select, then one category tap fixes every selected row.
+let reviewSelectMode = false;
+let reviewSel = new Set();
+
 function renderReview() {
   const list = data.review || [];
+  reviewSel = new Set([...reviewSel].filter((id) => list.some((t) => t.id === id)));
+  if (!list.length) reviewSelectMode = false;
   let html = '';
   if (!list.length) {
     html = `<div class="card" style="text-align:center;padding:34px 16px">
@@ -246,27 +255,62 @@ function renderReview() {
       <div style="font-size:17px;font-weight:700;margin-top:8px">Nothing to review</div>
       <div class="muted" style="font-size:14px;margin-top:4px">Every transaction is categorised &mdash; all clear to sync to Actual Budget.</div></div>`;
   } else {
-    html = `<div class="card"><h3>Needs a category (${data.reviewTotal})</h3>` +
-      list.map((t, i) => `<div class="txn tappable" data-i="${i}"><div style="min-width:0">
+    html = `<div class="card"><h3 style="display:flex;justify-content:space-between;align-items:center">
+      <span>Needs a category (${data.reviewTotal})</span>
+      ${list.length > 1 ? `<button type="button" id="selToggle" class="cardhead-btn">${reviewSelectMode ? 'Done' : 'Select'}</button>` : ''}</h3>` +
+      list.map((t, i) => `<div class="txn tappable" data-i="${i}">
+        ${reviewSelectMode ? `<div class="selmark${reviewSel.has(t.id) ? ' on' : ''}"></div>` : ''}
+        <div style="min-width:0;flex:1">
         <div class="m">${esc(t.merchant || '(no merchant)')}</div>
         <div class="sub">${esc(t.date)} &middot; ${esc(t.source)}${t.category === 'REVIEW' ? ' &middot; REVIEW' : ''}</div></div>
         <div class="val">${t.amountMYR === null ? '—' : fmt(t.amountMYR)}</div></div>`).join('') +
-      '</div><div class="muted" style="font-size:13px;text-align:center;margin-top:14px">Tap a transaction to pick its category.<br>These stay out of Actual Budget until categorised.</div>';
+      '</div>' +
+      (reviewSelectMode && reviewSel.size
+        ? `<button class="btn" id="batchBtn">Categorize ${reviewSel.size} selected&hellip;</button>`
+        : '') +
+      `<div class="muted" style="font-size:13px;text-align:center;margin-top:14px">${reviewSelectMode
+        ? 'Tap rows to select, then give them all one category.'
+        : 'Tap a transaction to pick its category.<br>These stay out of Actual Budget until categorised.'}</div>`;
   }
   $('view-review').innerHTML = html;
   document.querySelectorAll('#view-review .tappable').forEach((el) => {
-    el.addEventListener('click', () => openSheet(list[Number(el.dataset.i)]));
+    el.addEventListener('click', () => {
+      const t = list[Number(el.dataset.i)];
+      if (!reviewSelectMode) return openSheet([t]);
+      if (reviewSel.has(t.id)) reviewSel.delete(t.id); else reviewSel.add(t.id);
+      renderReview();
+    });
   });
+  const selToggle = $('selToggle');
+  if (selToggle) {
+    selToggle.addEventListener('click', () => {
+      reviewSelectMode = !reviewSelectMode;
+      if (!reviewSelectMode) reviewSel.clear();
+      renderReview();
+    });
+  }
+  const batchBtn = $('batchBtn');
+  if (batchBtn) {
+    batchBtn.addEventListener('click', () => openSheet(list.filter((t) => reviewSel.has(t.id))));
+  }
 }
 
-function openSheet(txn) {
+function openSheet(txns) {
+  if (!txns.length) return;
+  const many = txns.length > 1;
   // Budget keys carry the full funded plan (mirrored daily from Actual), so a
   // newly funded envelope becomes a chip before any row or rule uses it.
   const cats = [...new Set([...(data.categories || []), ...Object.keys(data.budgets || {}), ...BASE_CATS])];
   const sheet = $('sheet');
+  const head = many
+    ? `${txns.length} transactions`
+    : esc(txns[0].merchant || '(no merchant)');
+  const sub = many
+    ? 'one category for all of them'
+    : `${esc(txns[0].date)} &middot; ${txns[0].amountMYR === null ? 'no amount' : fmt(txns[0].amountMYR)}`;
   sheet.innerHTML = `<div class="inner">
-    <div style="font-size:17px;font-weight:700">${esc(txn.merchant || '(no merchant)')}</div>
-    <div class="muted" style="font-size:13px;margin-top:2px">${esc(txn.date)} &middot; ${txn.amountMYR === null ? 'no amount' : fmt(txn.amountMYR)}</div>
+    <div style="font-size:17px;font-weight:700">${head}</div>
+    <div class="muted" style="font-size:13px;margin-top:2px">${sub}</div>
     <div class="chips">${cats.map((c) => `<button data-c="${esc(c)}">${esc(c)}</button>`).join('')}
       <button data-new="1" style="color:#0a84ff">＋ New…</button></div>
     <button class="btn" style="background:#2c2c2e" id="sheetCancel">Cancel</button></div>`;
@@ -281,17 +325,25 @@ function openSheet(txn) {
         if (!cat) return;
       }
       closeSheet();
-      try {
-        const r = await categorize(txn.id, cat);
-        if (!r.ok) throw new Error(r.error || 'rejected');
-        data.review = data.review.filter((x) => x.id !== txn.id);
-        data.reviewTotal = Math.max(0, (data.reviewTotal || 1) - 1);
-        renderReview();
-        updateBadge();
-        toast(`${txn.merchant || 'Row'} → ${cat}`);
-      } catch (err) {
-        toast('Failed: ' + err.message);
+      let done = 0;
+      let lastErr = null;
+      for (const txn of txns) { // sequential: each categorize takes the backend lock
+        try {
+          const r = await categorize(txn.id, cat);
+          if (!r.ok) throw new Error(r.error || 'rejected');
+          done++;
+          data.review = data.review.filter((x) => x.id !== txn.id);
+          data.reviewTotal = Math.max(0, (data.reviewTotal || 1) - 1);
+        } catch (err) {
+          lastErr = err;
+        }
       }
+      reviewSel.clear();
+      if (done) reviewSelectMode = false;
+      renderReview();
+      updateBadge();
+      if (lastErr) toast(`${done}/${txns.length} → ${cat} · last error: ${lastErr.message}`);
+      else toast(many ? `${done} transactions → ${cat}` : `${txns[0].merchant || 'Row'} → ${cat}`);
     });
   });
 }
@@ -341,6 +393,35 @@ function fillAddChips() {
   });
 }
 
+// Recent MANUAL merchants as one-tap prefills on the Add form: the recurring
+// quick-adds (family transfer, phone bill, bank-transfer meals) are the #1
+// capture leak, so refilling them must cost one tap, not four fields.
+function fillRecentChips() {
+  const holder = $('recentChips');
+  if (!holder) return;
+  const seen = {};
+  const recents = ((data && data.recent) || [])
+    .filter((t) => t.source === 'manual' && t.merchant)
+    .filter((t) => {
+      const k = t.merchant.toLowerCase();
+      if (seen[k]) return false;
+      seen[k] = 1;
+      return true;
+    })
+    .slice(0, 6);
+  holder.classList.toggle('hidden', !recents.length);
+  holder.innerHTML = recents.map((t, i) => `<button type="button" data-i="${i}">&#8634;&#xfe0e; ${esc(t.merchant)}</button>`).join('');
+  holder.querySelectorAll('button').forEach((b) => {
+    b.addEventListener('click', () => {
+      const t = recents[Number(b.dataset.i)];
+      $('addMerchant').value = t.merchant;
+      if (t.amountMYR !== null && t.amountMYR > 0) $('addAmount').value = String(t.amountMYR);
+      $('addChips').querySelectorAll('button').forEach((x) => x.classList.toggle('sel', x.dataset.c === t.category));
+      toast('Prefilled — adjust and log');
+    });
+  });
+}
+
 function localToday() {
   const d = new Date();
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -362,6 +443,8 @@ async function saveQuickAdd() {
   if (paidback && !cat) return toast('Pick the envelope the repayment nets');
   const fields = { merchant, amount: paidback ? '-' + amount : amount, currency: $('addCurrency').value };
   if (cat) fields.category = cat;
+  const note = $('addNote').value.trim();
+  if (note) fields.note = note; // e.g. "fronted: Ali" — needs webhook v25+; older backends ignore it
   // Only send a date when it isn't today, so "now" keeps its time of day (dedup ordering).
   if ($('addDate').value && $('addDate').value !== localToday()) fields.date = $('addDate').value;
   const btn = $('addSave');
@@ -377,6 +460,7 @@ async function saveQuickAdd() {
     if (r.id && !r.dedup) rememberLastAdd(r.id, `${paidback ? '+' : ''}${amtText} · ${merchant}`);
     $('addMerchant').value = '';
     $('addAmount').value = '';
+    $('addNote').value = '';
     $('addChips').querySelectorAll('button').forEach((x) => x.classList.remove('sel'));
     $('addDate').value = localToday();
     $('addPaidback').checked = false;
@@ -416,6 +500,7 @@ async function refresh() {
     renderOverview();
     renderReview();
     fillAddChips();
+    fillRecentChips();
     updateBadge();
   } catch (err) {
     // A rejected key never fixes itself: reopen setup so the link can be re-pasted.

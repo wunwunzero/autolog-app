@@ -42,6 +42,10 @@
   .txn .val { font-size: 15px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .txn .val.in { color: #30d158; }
   .txn.tappable:active { opacity: .6; }
+  .selmark { width: 20px; height: 20px; border-radius: 100px; border: 1.5px solid #3a3a3c; flex: 0 0 auto; }
+  .selmark.on { background: #0a84ff; border-color: #0a84ff; }
+  .cardhead-btn { background: none; border: 0; color: #0a84ff; font-family: inherit; font-size: 12px;
+    font-weight: 600; text-transform: none; letter-spacing: 0; padding: 0; }
   nav { position: fixed; left: 0; right: 0; bottom: 0; display: flex;
     background: rgba(18,18,20,.92); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
     border-top: .5px solid #2c2c2e; padding: 10px 0 calc(10px + env(safe-area-inset-bottom)); }
@@ -96,6 +100,7 @@
     <div id="view-review" class="hidden"></div>
     <div id="view-add" class="hidden">
       <div class="card"><h3>Log a transaction</h3>
+        <div class="chips hidden" id="recentChips" style="margin-top:12px"></div>
         <div style="margin-top:14px"><input type="text" id="addMerchant" placeholder="Merchant" autocomplete="off"></div>
         <div style="display:flex;gap:10px;margin-top:10px">
           <input type="text" inputmode="decimal" id="addAmount" placeholder="Amount" style="flex:1" autocomplete="off">
@@ -106,6 +111,7 @@
           </select>
         </div>
         <div style="margin-top:10px"><input type="date" id="addDate"></div>
+        <div style="margin-top:10px"><input type="text" id="addNote" placeholder="Note (optional) — &quot;fronted: Ali&quot; tracks repayment" autocomplete="off"></div>
         <label style="display:flex;align-items:center;gap:10px;margin-top:14px;font-size:15px">
           <input type="checkbox" id="addPaidback" style="width:20px;height:20px;accent-color:#30d158;margin:0">
           Paid back &mdash; someone repaid money I fronted</label>
@@ -115,7 +121,9 @@
       <div class="muted" style="font-size:13px;text-align:center;margin-top:14px">
         Same pipeline as Apple Pay taps &mdash; dedup, alerts and budgets included.<br>
         No category picked? The rules decide, or it lands in Review.<br>
-        Paid back? Pick the envelope you fronted from &mdash; the repayment nets it.</div>
+        Paid back? Pick the envelope you fronted from &mdash; the repayment nets it.<br>
+        Fronting money? Note &ldquo;fronted: name&rdquo; on the spend AND the repayment &mdash;
+        the weekly digest tracks who still owes.</div>
     </div>
   </div>
 
@@ -129,6 +137,6 @@
   <div id="sheet" class="hidden"></div>
   <div id="toast"></div>
   <!-- bump ?v= on every app.js change: Safari/PWA caches are sticky -->
-  <script src="app.js?v=15"></script>
+  <script src="app.js?v=16"></script>
 </body>
 </html>
