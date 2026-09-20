@@ -6,7 +6,7 @@
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
-const APP_VERSION = 16; // keep in step with index.html's app.js?v=
+const APP_VERSION = 17; // keep in step with index.html's app.js?v=
 // The backend address is fixed and not secret (auth lives in the key), so connecting
 // only truly requires the key itself.
 const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
@@ -23,6 +23,11 @@ const DEMO = {
   budgets: { Food: 600, Groceries: 450, Transport: 200, Subscriptions: 60, Fuel: 250 },
   categories: ['Food', 'Groceries', 'Transport', 'Fuel', 'Shopping', 'Health', 'Subscriptions'],
   coverage: { tng: '2026-08-14', hsbc: '2026-08-16', rhb: null, alipay: '2026-08-15' },
+  efBalanceMYR: 2446.21,
+  fronted: [
+    { name: 'Ali', outstandingMYR: 180, since: '2026-08-10', count: 3 },
+    { name: 'Mei', outstandingMYR: 45.5, since: '2026-08-16', count: 1 }
+  ],
   reviewTotal: 3,
   review: [
     { id: 'd1', date: '2026-08-15', merchant: 'MYSTERY SHOP 88', amountMYR: 42, category: 'Uncategorized', source: 'statement' },
@@ -191,6 +196,31 @@ function renderOverview() {
     html += `<div class="card"><h3>${bCats.length ? 'Other spending' : 'Spending'}</h3><div style="margin-top:2px">` +
       others.map((x) => barRow(x.c, fmt(x.s), Math.max(2, Math.round(x.s / max * 100)), '#0a84ff')).join('') +
       '</div></div>';
+  }
+
+  // Emergency Fund progress (bridge-mirrored daily; older backends omit the field).
+  // The bar shows progress toward a soft 3-months-of-planned-spending goal.
+  if (typeof data.efBalanceMYR === 'number') {
+    let capSum = 0;
+    Object.keys(budgets).forEach((c) => { capSum += budgets[c]; });
+    const months = capSum > 0 ? data.efBalanceMYR / capSum : null;
+    const goalPct = months !== null ? Math.min(100, months / 3 * 100) : 0;
+    html += `<div class="card"><h3>Emergency Fund</h3>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:12px">
+        <div style="font-size:24px;font-weight:800;letter-spacing:-.5px">${fmt(data.efBalanceMYR)}</div>
+        ${months !== null ? `<div class="muted" style="font-size:13px;font-weight:600">&asymp; ${months.toFixed(1)} mo of spending</div>` : ''}</div>
+      ${months !== null ? `<div class="track" style="margin-top:10px"><div class="fill" style="width:${Math.max(2, goalPct)}%;background:#30d158"></div></div>
+      <div class="muted" style="font-size:12px;margin-top:7px">toward a 3-month cushion &middot; grows via month-end sweeps</div>` : ''}</div>`;
+  }
+
+  // Who still owes you (rows tagged "fronted: name"; empty list = card hidden).
+  if (data.fronted && data.fronted.length) {
+    html += `<div class="card"><h3>Owed to you</h3>` +
+      data.fronted.map((f) => `<div class="txn"><div style="min-width:0">
+        <div class="m">${esc(f.name)}</div>
+        <div class="sub">since ${esc(f.since ? fmtCoverageDate(f.since) : '?')} &middot; ${f.count} row(s)</div></div>
+        <div class="val" style="color:#ffd60a">${fmt(f.outstandingMYR)}</div></div>`).join('') +
+      `</div><div class="muted" style="font-size:12px;margin-top:6px;text-align:center">Paid back? Log it with the same &ldquo;fronted: name&rdquo; note to clear it.</div>`;
   }
 
   // Capture coverage: how far each statement channel is imported ("synced until").
