@@ -6,7 +6,7 @@
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
-const APP_VERSION = 17; // keep in step with index.html's app.js?v=
+const APP_VERSION = 18; // keep in step with index.html's app.js?v=
 // The backend address is fixed and not secret (auth lives in the key), so connecting
 // only truly requires the key itself.
 const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
@@ -57,8 +57,12 @@ function toast(msg) {
   const t = $('toast');
   t.textContent = msg;
   t.style.opacity = 1;
+  t.style.transform = 'translateX(-50%)'; // rises from its resting +8px offset
   clearTimeout(t._h);
-  t._h = setTimeout(() => { t.style.opacity = 0; }, 2600);
+  t._h = setTimeout(() => {
+    t.style.opacity = 0;
+    t.style.transform = 'translateX(-50%) translateY(8px)';
+  }, 2600);
 }
 
 function parseConnect(s) {
@@ -145,22 +149,58 @@ function ringSvg(pct, color) {
   return `<svg width="88" height="88" viewBox="0 0 42 42" style="flex:0 0 auto">
     <circle cx="21" cy="21" r="15.915" fill="none" stroke="#2c2c2e" stroke-width="4.2"/>
     ${pct > 0 ? `<circle cx="21" cy="21" r="15.915" fill="none" stroke="${color}" stroke-width="4.2"
-      stroke-linecap="round" stroke-dasharray="${shown} 100" transform="rotate(-90 21 21)"/>` : ''}
+      stroke-linecap="round" stroke-dasharray="0 100" data-dash="${shown}" transform="rotate(-90 21 21)"/>` : ''}
     <text x="21" y="24.5" text-anchor="middle" font-size="9.5" font-weight="700" fill="#fff"
       font-family="-apple-system,system-ui,sans-serif">${Math.round(pct)}%</text></svg>`;
 }
 
+// Bars and the budget ring render at zero and sweep to their real value on the
+// next frame (CSS transitions do the motion) — the "feels static" fix.
 function barRow(name, right, pct, color) {
   return `<div class="barrow"><div class="top"><span class="name">${esc(name)}</span>
     <span class="amt">${right}</span></div>
-    <div class="track"><div class="fill" style="width:${pct}%;background:${color}"></div></div></div>`;
+    <div class="track"><div class="fill" style="width:2%;background:${color}" data-w="${pct}"></div></div></div>`;
+}
+
+function animateFills(rootId) {
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    document.querySelectorAll('#' + rootId + ' .fill[data-w]').forEach((f) => { f.style.width = f.dataset.w + '%'; });
+    document.querySelectorAll('#' + rootId + ' circle[data-dash]').forEach((c) => {
+      c.setAttribute('stroke-dasharray', c.dataset.dash + ' 100');
+    });
+  }));
+}
+
+// Headline total counts up on the first paint of a session (ease-out, 500ms).
+function countUp(el, target) {
+  const start = performance.now();
+  const step = (now) => {
+    const p = Math.min(1, (now - start) / 500);
+    el.textContent = fmt(target * (1 - Math.pow(1 - p, 3)));
+    if (p < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+// Placeholder skeleton while the backend builds the snapshot (2–5s): the user
+// chose fresh-data-always over cached-instant, so the wait must look deliberate.
+function renderSkeleton() {
+  const card = (rows) => `<div class="card"><div class="skel" style="width:38%;height:12px"></div>` +
+    Array.from({ length: rows }, (_, i) =>
+      `<div class="skel" style="height:14px;margin-top:16px;width:${88 - i * 9}%"></div>`).join('') + '</div>';
+  $('view-overview').innerHTML =
+    `<div class="skel" style="width:56%;height:44px;margin-top:10px;border-radius:10px"></div>
+     <div class="skel" style="width:40%;height:12px;margin-top:10px"></div>` +
+    card(4) + card(3) + card(2);
 }
 
 function renderOverview() {
   const budgets = data.budgets || {};
   const byCat = data.byCat || {};
   const bCats = Object.keys(budgets);
-  let html = `<div style="font-size:44px;font-weight:800;letter-spacing:-1px;margin-top:6px">${fmt(data.totalMYR)}</div>
+  const firstPaint = !renderOverview._painted;
+  renderOverview._painted = true;
+  let html = `<div id="bigTotal" style="font-size:44px;font-weight:800;letter-spacing:-1px;margin-top:6px">${fmt(data.totalMYR)}</div>
     <div class="muted" style="font-size:13px;margin-top:2px">spent this month &middot; day ${data.dayOfMonth} of ${data.daysInMonth}</div>`;
 
   const undo = pendingUndo();
@@ -209,7 +249,7 @@ function renderOverview() {
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:12px">
         <div style="font-size:24px;font-weight:800;letter-spacing:-.5px">${fmt(data.efBalanceMYR)}</div>
         ${months !== null ? `<div class="muted" style="font-size:13px;font-weight:600">&asymp; ${months.toFixed(1)} mo of spending</div>` : ''}</div>
-      ${months !== null ? `<div class="track" style="margin-top:10px"><div class="fill" style="width:${Math.max(2, goalPct)}%;background:#30d158"></div></div>
+      ${months !== null ? `<div class="track" style="margin-top:10px"><div class="fill" style="width:2%;background:#30d158" data-w="${Math.max(2, goalPct)}"></div></div>
       <div class="muted" style="font-size:12px;margin-top:7px">toward a 3-month cushion &middot; grows via month-end sweeps</div>` : ''}</div>`;
   }
 
@@ -244,7 +284,11 @@ function renderOverview() {
         <div class="val${inflow ? ' in' : ''}">${t.amountMYR === null ? '—' : (inflow ? '+' + fmt(-t.amountMYR) : fmt(t.amountMYR))}</div></div>`;
     }).join('') +
     `</div><div class="muted" style="text-align:center;margin-top:20px;font-size:12px">Updated ${esc(data.generatedAt || '')}</div>`;
-  $('view-overview').innerHTML = html;
+  const view = $('view-overview');
+  view.classList.toggle('firstpaint', firstPaint); // card entrance stagger, first load only
+  view.innerHTML = html;
+  animateFills('view-overview');
+  if (firstPaint && data.totalMYR > 0) countUp($('bigTotal'), data.totalMYR);
 
   const undoBtn = $('undoBtn');
   if (undoBtn) {
@@ -524,6 +568,7 @@ function showSetup(message) {
 }
 
 async function refresh() {
+  $('tab-refresh').classList.add('busy');
   try {
     data = await fetchData();
     $('month').textContent = data.month;
@@ -539,6 +584,8 @@ async function refresh() {
       return;
     }
     toast('Could not load: ' + err.message);
+  } finally {
+    $('tab-refresh').classList.remove('busy');
   }
 }
 
@@ -576,6 +623,7 @@ function boot() {
     $('addMerchant').placeholder = $('addPaidback').checked ? 'Repayment - Ali dinner' : 'Merchant';
   });
   fillAddChips();
+  renderSkeleton(); // the first fetch takes the backend 2–5s; never show a blank screen
   document.addEventListener('visibilitychange', () => { if (!document.hidden) { refresh(); healViewport(); } });
   // Keyboard dismissal is the main viewport-shrinker: heal on every input blur, and on
   // any visual-viewport resize settling (covers prompt(), rotation, keyboard).
