@@ -6,7 +6,7 @@
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
-const APP_VERSION = 18; // keep in step with index.html's app.js?v=
+const APP_VERSION = 19; // keep in step with index.html's app.js?v=
 // The backend address is fixed and not secret (auth lives in the key), so connecting
 // only truly requires the key itself.
 const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
@@ -24,6 +24,7 @@ const DEMO = {
   categories: ['Food', 'Groceries', 'Transport', 'Fuel', 'Shopping', 'Health', 'Subscriptions'],
   coverage: { tng: '2026-08-14', hsbc: '2026-08-16', rhb: null, alipay: '2026-08-15' },
   efBalanceMYR: 2446.21,
+  efMonthlyBasisMYR: 6980,
   fronted: [
     { name: 'Ali', outstandingMYR: 180, since: '2026-08-10', count: 3 },
     { name: 'Mei', outstandingMYR: 45.5, since: '2026-08-16', count: 1 }
@@ -88,6 +89,8 @@ function parseConnect(s) {
   }
   return null;
 }
+
+function isDemo() { return !!new URLSearchParams(location.search).get('demo'); }
 
 async function fetchData() {
   if (new URLSearchParams(location.search).get('demo')) return DEMO;
@@ -239,18 +242,19 @@ function renderOverview() {
   }
 
   // Emergency Fund progress (bridge-mirrored daily; older backends omit the field).
-  // The bar shows progress toward a soft 3-months-of-planned-spending goal.
+  // The bar shows progress toward a soft 3-month cushion of CORE OUTFLOW (loan,
+  // bills, living envelopes — the backend's efMonthlyBasisMYR). Budgets-tab caps
+  // were the wrong denominator: they omit the loan and include savings pots.
   if (typeof data.efBalanceMYR === 'number') {
-    let capSum = 0;
-    Object.keys(budgets).forEach((c) => { capSum += budgets[c]; });
-    const months = capSum > 0 ? data.efBalanceMYR / capSum : null;
+    const basis = data.efMonthlyBasisMYR > 0 ? data.efMonthlyBasisMYR : null;
+    const months = basis ? data.efBalanceMYR / basis : null;
     const goalPct = months !== null ? Math.min(100, months / 3 * 100) : 0;
     html += `<div class="card"><h3>Emergency Fund</h3>
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:12px">
         <div style="font-size:24px;font-weight:800;letter-spacing:-.5px">${fmt(data.efBalanceMYR)}</div>
-        ${months !== null ? `<div class="muted" style="font-size:13px;font-weight:600">&asymp; ${months.toFixed(1)} mo of spending</div>` : ''}</div>
+        ${months !== null ? `<div class="muted" style="font-size:13px;font-weight:600">&asymp; ${months.toFixed(1)} mo of core outflow</div>` : ''}</div>
       ${months !== null ? `<div class="track" style="margin-top:10px"><div class="fill" style="width:2%;background:#30d158" data-w="${Math.max(2, goalPct)}"></div></div>
-      <div class="muted" style="font-size:12px;margin-top:7px">toward a 3-month cushion &middot; grows via month-end sweeps</div>` : ''}</div>`;
+      <div class="muted" style="font-size:12px;margin-top:7px">toward a 3-month cushion (${fmt(basis * 3)}) &middot; the envelope only &mdash; off-budget savings not counted</div>` : ''}</div>`;
   }
 
   // Who still owes you (rows tagged "fronted: name"; empty list = card hidden).
@@ -302,6 +306,7 @@ function renderOverview() {
         if (!r.ok) throw new Error(r.error || 'rejected');
         clearLastAdd();
         toast('Removed — ' + u.text);
+        renderOverview(); // drop the pill now, even if the refresh below fails
         refresh();
       } catch (err) {
         // A closed window or vanished row means the pill is stale: drop it.
@@ -317,11 +322,13 @@ function renderOverview() {
 // multi-select, then one category tap fixes every selected row.
 let reviewSelectMode = false;
 let reviewSel = new Set();
+const inFlightIds = new Set(); // rows whose categorize POST hasn't answered yet
 
 function renderReview() {
-  const list = data.review || [];
+  const list = (data.review || []).filter((t) => !inFlightIds.has(t.id));
+  data.review = list;
   reviewSel = new Set([...reviewSel].filter((id) => list.some((t) => t.id === id)));
-  if (!list.length) reviewSelectMode = false;
+  if (list.length <= 1) reviewSelectMode = false; // the Select/Done toggle hides below 2 rows
   let html = '';
   if (!list.length) {
     html = `<div class="card" style="text-align:center;padding:34px 16px">
@@ -389,7 +396,9 @@ function openSheet(txns) {
       <button data-new="1" style="color:#0a84ff">＋ New…</button></div>
     <button class="btn" style="background:#2c2c2e" id="sheetCancel">Cancel</button></div>`;
   sheet.classList.remove('hidden');
-  sheet.addEventListener('click', (e) => { if (e.target === sheet) closeSheet(); }, { once: true });
+  // Property, not addEventListener: a {once} listener was consumed by any tap
+  // INSIDE the sheet (clicks bubble), leaving the backdrop dead afterwards.
+  sheet.onclick = (e) => { if (e.target === sheet) closeSheet(); };
   $('sheetCancel').addEventListener('click', closeSheet);
   sheet.querySelectorAll('.chips button').forEach((b) => {
     b.addEventListener('click', async () => {
@@ -399,25 +408,40 @@ function openSheet(txns) {
         if (!cat) return;
       }
       closeSheet();
+      // Take the rows off screen BEFORE the (slow, sequential) POSTs so they
+      // can't be tapped and submitted twice; any refresh landing mid-loop is
+      // filtered through inFlightIds so it can't resurrect them either.
+      txns.forEach((t) => inFlightIds.add(t.id));
+      const before = data.review.length;
+      data.review = data.review.filter((x) => !inFlightIds.has(x.id));
+      data.reviewTotal = Math.max(0, (data.reviewTotal || 0) - (before - data.review.length));
+      reviewSel.clear();
+      reviewSelectMode = false;
+      renderReview();
+      updateBadge();
       let done = 0;
       let lastErr = null;
+      const failed = [];
       for (const txn of txns) { // sequential: each categorize takes the backend lock
         try {
           const r = await categorize(txn.id, cat);
           if (!r.ok) throw new Error(r.error || 'rejected');
           done++;
-          data.review = data.review.filter((x) => x.id !== txn.id);
-          data.reviewTotal = Math.max(0, (data.reviewTotal || 1) - 1);
         } catch (err) {
           lastErr = err;
+          failed.push(txn);
         }
       }
-      reviewSel.clear();
-      if (done) reviewSelectMode = false;
-      renderReview();
-      updateBadge();
+      txns.forEach((t) => inFlightIds.delete(t.id));
+      if (failed.length) {
+        data.review = failed.concat(data.review);
+        data.reviewTotal += failed.length;
+        renderReview();
+        updateBadge();
+      }
       if (lastErr) toast(`${done}/${txns.length} → ${cat} · last error: ${lastErr.message}`);
       else toast(many ? `${done} transactions → ${cat}` : `${txns[0].merchant || 'Row'} → ${cat}`);
+      if (done) refresh(); // Overview spend + the >100-row review tail catch up
     });
   });
 }
@@ -428,8 +452,14 @@ function closeSheet() { $('sheet').classList.add('hidden'); healViewport(); }
 // prompt() closes, until a real scroll event fires - the fixed tab bar floats mid-screen
 // on pages too short to scroll. The body is kept 2px taller than the viewport so this
 // nudge always produces a genuine scroll and snaps the viewport back.
+// The nudge returns to the CURRENT scroll position — ending on scrollTo(0, 0)
+// yanked a long Review list back to the top after every categorize.
 function healViewport() {
-  setTimeout(() => { window.scrollTo(0, 1); window.scrollTo(0, 0); }, 80);
+  setTimeout(() => {
+    const y = window.scrollY;
+    window.scrollTo(0, y > 0 ? y - 1 : 1);
+    window.scrollTo(0, y);
+  }, 80);
 }
 
 function updateBadge() {
@@ -489,11 +519,25 @@ function fillRecentChips() {
     b.addEventListener('click', () => {
       const t = recents[Number(b.dataset.i)];
       $('addMerchant').value = t.merchant;
-      if (t.amountMYR !== null && t.amountMYR > 0) $('addAmount').value = String(t.amountMYR);
+      // amountMYR is MYR and signed: reset the currency, and mirror a repayment
+      // row's sign into the Paid back box (else "+45 Food" would log as a spend).
+      $('addAmount').value = t.amountMYR !== null ? String(Math.abs(t.amountMYR)) : '';
+      $('addCurrency').value = 'MYR';
+      $('addPaidback').checked = t.amountMYR !== null && t.amountMYR < 0;
+      $('addPaidback').dispatchEvent(new Event('change'));
       $('addChips').querySelectorAll('button').forEach((x) => x.classList.toggle('sel', x.dataset.c === t.category));
       toast('Prefilled — adjust and log');
     });
   });
+}
+
+// "1,200" and "1,234.50" are thousands separators; a lone "12,50" is a decimal
+// comma. (The old blanket replace(',', '.') turned "1,200" into RM1.20.)
+function amountValue(s) {
+  s = String(s || '').replace(/\s/g, '');
+  if (s.indexOf('.') !== -1 || /^\d{1,3}(,\d{3})+$/.test(s)) s = s.replace(/,/g, '');
+  else s = s.replace(',', '.');
+  return /^\d*\.?\d+$/.test(s) ? parseFloat(s) : NaN;
 }
 
 function localToday() {
@@ -507,10 +551,11 @@ function addSaveLabel() {
 
 async function saveQuickAdd() {
   const merchant = $('addMerchant').value.trim();
-  const amount = $('addAmount').value.trim().replace(',', '.');
+  const value = amountValue($('addAmount').value);
   const paidback = $('addPaidback').checked;
   if (!merchant) return toast('Give it a merchant name');
-  if (!(parseFloat(amount) > 0)) return toast('Amount must be more than 0');
+  if (!(value > 0)) return toast('Amount must be a number more than 0');
+  const amount = String(value); // normalized, so the backend stores exactly what the toast shows
   const cat = $('addChips').querySelector('.sel')?.dataset.c;
   // A repayment nets a specific envelope, so the category is not optional —
   // the backend rejects category-less negatives too (they'd sync wrong).
@@ -527,14 +572,15 @@ async function saveQuickAdd() {
   try {
     const r = await quickAdd(fields);
     if (!r.ok) throw new Error(r.error || 'rejected');
-    const amtText = fields.currency === 'MYR' ? fmt(parseFloat(amount)) : fields.currency + ' ' + amount;
+    const amtText = fields.currency === 'MYR' ? fmt(value) : fields.currency + ' ' + amount;
     toast(paidback
       ? `Paid back ${amtText} into ${cat}${r.dedup ? ' (already logged)' : ''}`
       : `Logged ${amtText} at ${merchant}${r.dedup ? ' (already logged)' : ''}`);
-    if (r.id && !r.dedup) rememberLastAdd(r.id, `${paidback ? '+' : ''}${amtText} · ${merchant}`);
+    if (r.id && !r.dedup && !isDemo()) rememberLastAdd(r.id, `${paidback ? '+' : ''}${amtText} · ${merchant}`);
     $('addMerchant').value = '';
     $('addAmount').value = '';
     $('addNote').value = '';
+    $('addCurrency').value = 'MYR'; // a stale SGD would silently re-price the next add
     $('addChips').querySelectorAll('button').forEach((x) => x.classList.remove('sel'));
     $('addDate').value = localToday();
     $('addPaidback').checked = false;
@@ -551,6 +597,7 @@ async function saveQuickAdd() {
 
 function showSetup(message) {
   localStorage.removeItem(CFG_KEY);
+  cfg = null; // else every foregrounding re-fetches with the rejected key and re-toasts
   $('app').classList.add('hidden');
   $('nav').classList.add('hidden');
   $('setup').classList.remove('hidden');
@@ -567,10 +614,19 @@ function showSetup(message) {
   if (message) toast(message);
 }
 
+// Snapshots take the backend 2–5s, so refreshes overlap (foregrounding + a
+// quick-add, say). Only the newest may land: an older snapshot finishing last
+// would resurrect a just-categorized row or hide a just-added one.
+let refreshSeq = 0;
+
 async function refresh() {
+  if (!cfg && !isDemo()) return; // disconnected (e.g. key rejected): nothing to fetch
+  const seq = ++refreshSeq;
   $('tab-refresh').classList.add('busy');
   try {
-    data = await fetchData();
+    const fresh = await fetchData();
+    if (seq !== refreshSeq) return;
+    data = fresh;
     $('month').textContent = data.month;
     renderOverview();
     renderReview();
@@ -578,15 +634,25 @@ async function refresh() {
     fillRecentChips();
     updateBadge();
   } catch (err) {
+    if (seq !== refreshSeq) return;
     // A rejected key never fixes itself: reopen setup so the link can be re-pasted.
     if (/refused/i.test(err.message)) {
       showSetup('Key rejected — paste your dashboard link again');
       return;
     }
     toast('Could not load: ' + err.message);
+    if (!data) renderLoadError(err.message); // never leave the skeleton shimmering forever
   } finally {
-    $('tab-refresh').classList.remove('busy');
+    if (seq === refreshSeq) $('tab-refresh').classList.remove('busy');
   }
+}
+
+function renderLoadError(message) {
+  $('view-overview').innerHTML = `<div class="card" style="text-align:center;padding:30px 16px">
+    <div style="font-size:17px;font-weight:700">Couldn&rsquo;t load your numbers</div>
+    <div class="muted" style="font-size:13px;margin-top:6px">${esc(message)}</div>
+    <button class="btn" id="retryBtn">Try again</button></div>`;
+  $('retryBtn').addEventListener('click', () => { renderSkeleton(); refresh(); });
 }
 
 function boot() {
@@ -600,7 +666,9 @@ function boot() {
   // Tap-to-connect: …/autolog-app/#connect=<url-encoded dashboard link>, sent by the
   // backend's emailDashLink(). Configures the app in one tap, no copying.
   if (location.hash.indexOf('#connect=') === 0) {
-    const parsed = parseConnect(decodeURIComponent(location.hash.slice(9)));
+    // parseConnect peels the #connect= layer and decodes safely itself; a raw
+    // decodeURIComponent here threw on a malformed % and killed boot().
+    const parsed = parseConnect(location.hash);
     if (parsed) localStorage.setItem(CFG_KEY, JSON.stringify(parsed));
     history.replaceState(null, '', location.pathname);
   }
