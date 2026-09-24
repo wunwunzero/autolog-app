@@ -36,7 +36,11 @@
   .barrow .top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
   .barrow .name { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .barrow .amt { font-size: 12px; color: #98989f; white-space: nowrap; font-variant-numeric: tabular-nums; }
-  .track { background: #2c2c2e; border-radius: 3px; height: 6px; margin-top: 6px; overflow: hidden; }
+  .track { position: relative; background: #2c2c2e; border-radius: 3px; height: 6px; margin-top: 6px; overflow: hidden; }
+  .pace { position: absolute; top: 0; width: 2px; height: 6px; background: #fff; opacity: .8; }
+  .pacetext { font-size: 11px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .barrow.tappable:active { opacity: .6; }
+  #sheet .inner.scroll { max-height: 82vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   .fill { height: 6px; border-radius: 3px; transition: width .5s cubic-bezier(.22,.9,.34,1); }
   .txn { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 0 10px; border-top: .5px solid #2c2c2e; }
   .txn:first-of-type { border-top: 0; padding-top: 14px; }
@@ -163,6 +167,6 @@
   <div id="sheet" class="hidden"></div>
   <div id="toast"></div>
   <!-- bump ?v= on every app.js change: Safari/PWA caches are sticky -->
-  <script src="app.js?v=19"></script>
+  <script src="app.js?v=20"></script>
 </body>
 </html>

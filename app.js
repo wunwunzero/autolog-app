@@ -1,12 +1,13 @@
 'use strict';
 /* Autolog phone app: static shell for the Expense Autolog Apps Script backend.
    GET  ?view=data&key=…              -> snapshot JSON
-   POST {action:'categorize', key,…}  -> set one row's category (the view key's only mutation)
+   POST {action:'categorize'|'quickadd'|'undo_quickadd'|'set_fronted', key,…} — the view
+        key's only mutations (set_fronted changes just the "fronted:" tag in Notes)
    Config { url, key } lives in localStorage only. ?demo=1 renders sample data. */
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
-const APP_VERSION = 19; // keep in step with index.html's app.js?v=
+const APP_VERSION = 20; // keep in step with index.html's app.js?v=
 // The backend address is fixed and not secret (auth lives in the key), so connecting
 // only truly requires the key itself.
 const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
@@ -25,6 +26,16 @@ const DEMO = {
   coverage: { tng: '2026-08-14', hsbc: '2026-08-16', rhb: null, alipay: '2026-08-15' },
   efBalanceMYR: 2446.21,
   efMonthlyBasisMYR: 6980,
+  buffer: { balanceMYR: 1810, floorMYR: 2500 },
+  audit: { cashMYR: 11431.4, autologMYR: -900.2, unbilledMYR: 543.6, asOf: '2026-08-18 07:31' },
+  projByCat: { Food: 246, Groceries: 470, Transport: 73.4, Subscriptions: 54.9, Fuel: 80 },
+  monthRows: [
+    { id: 'm1', date: '2026-08-18', merchant: 'Starbucks KLIA2', amountMYR: 19.5, category: 'Food', source: 'applepay', fronted: null },
+    { id: 'm2', date: '2026-08-16', merchant: 'KBBQ dinner', amountMYR: 90, category: 'Food', source: 'applepay', fronted: 'Mei' },
+    { id: 'm3', date: '2026-08-14', merchant: 'Nasi lemak', amountMYR: 33.3, category: 'Food', source: 'tng', fronted: null },
+    { id: 'm4', date: '2026-08-12', merchant: 'Village Grocer', amountMYR: 441.1, category: 'Groceries', source: 'applepay', fronted: null },
+    { id: 'm5', date: '2026-08-10', merchant: 'Exit Toll: ELITE', amountMYR: 42.6, category: 'Transport', source: 'tng', fronted: null }
+  ],
   fronted: [
     { name: 'Ali', outstandingMYR: 180, since: '2026-08-10', count: 3 },
     { name: 'Mei', outstandingMYR: 45.5, since: '2026-08-16', count: 1 }
@@ -159,10 +170,16 @@ function ringSvg(pct, color) {
 
 // Bars and the budget ring render at zero and sweep to their real value on the
 // next frame (CSS transitions do the motion) — the "feels static" fix.
-function barRow(name, right, pct, color) {
-  return `<div class="barrow"><div class="top"><span class="name">${esc(name)}</span>
-    <span class="amt">${right}</span></div>
-    <div class="track"><div class="fill" style="width:2%;background:${color}" data-w="${pct}"></div></div></div>`;
+// opts.cat makes the row tappable (drill-down); opts.pacePct/paceText add the
+// month-end projection tick + caption (backend projByCat: one-offs of RM100+
+// aren't extrapolated, so a paid bill never "paces" over its envelope).
+function barRow(name, right, pct, color, opts) {
+  opts = opts || {};
+  return `<div class="barrow${opts.cat ? ' tappable' : ''}"${opts.cat ? ` data-cat="${esc(opts.cat)}"` : ''}>
+    <div class="top"><span class="name">${esc(name)}</span><span class="amt">${right}</span></div>
+    <div class="track"><div class="fill" style="width:2%;background:${color}" data-w="${pct}"></div>
+    ${opts.pacePct !== undefined ? `<div class="pace" style="left:calc(${opts.pacePct}% - 1px)"></div>` : ''}</div>
+    ${opts.paceText ? `<div class="pacetext" style="color:${opts.paceOver ? '#ff453a' : '#98989f'}">${opts.paceText}</div>` : ''}</div>`;
 }
 
 function animateFills(rootId) {
@@ -227,9 +244,19 @@ function renderOverview() {
       <div class="muted" style="font-size:13px">of ${fmt(capSum)} budgeted</div>
       <div style="font-size:13px;font-weight:600;margin-top:3px;color:${left >= 0 ? '#30d158' : '#ff453a'}">
       ${left >= 0 ? fmt(left) + ' left' : fmt(-left) + ' over'}</div></div></div><div style="margin-top:6px">` +
-      rows.map((x) => barRow(x.c, `${fmt(x.s)} / ${fmt(x.cap)}`,
-        Math.max(2, Math.min(100, Math.round(x.r * 100))), barColor(x.r))).join('') +
-      '</div></div>';
+      rows.map((x) => {
+        const proj = data.projByCat ? data.projByCat[x.c] : undefined;
+        const opts = { cat: x.c };
+        // Only when the projection adds something beyond what's already spent.
+        if (typeof proj === 'number' && proj > x.s + 0.5) {
+          opts.pacePct = Math.min(100, Math.round(proj / x.cap * 100));
+          opts.paceOver = proj > x.cap;
+          opts.paceText = `on pace for ${fmt(proj)}${opts.paceOver ? ` &mdash; ${fmt(proj - x.cap)} over` : ''}`;
+        }
+        return barRow(x.c, `${fmt(x.s)} / ${fmt(x.cap)}`,
+          Math.max(2, Math.min(100, Math.round(x.r * 100))), barColor(x.r), opts);
+      }).join('') +
+      `</div><div class="muted" style="font-size:12px;margin-top:10px">Tap a category to see its transactions. The white tick marks where it lands at this pace.</div></div>`;
   }
 
   const others = Object.keys(byCat).filter((c) => !budgets[c] && c !== 'REFUND')
@@ -237,7 +264,7 @@ function renderOverview() {
   if (others.length) {
     const max = Math.max(others[0].s, 0.01);
     html += `<div class="card"><h3>${bCats.length ? 'Other spending' : 'Spending'}</h3><div style="margin-top:2px">` +
-      others.map((x) => barRow(x.c, fmt(x.s), Math.max(2, Math.round(x.s / max * 100)), '#0a84ff')).join('') +
+      others.map((x) => barRow(x.c, fmt(x.s), Math.max(2, Math.round(x.s / max * 100)), '#0a84ff', { cat: x.c })).join('') +
       '</div></div>';
   }
 
@@ -257,6 +284,34 @@ function renderOverview() {
       <div class="muted" style="font-size:12px;margin-top:7px">toward a 3-month cushion (${fmt(basis * 3)}) &middot; the envelope only &mdash; off-budget savings not counted</div>` : ''}</div>`;
   }
 
+  // Buffer vs its floor (bridge-mirrored daily; floor defaults to RM2,500 — the
+  // worst single-month shock seen). Refilled by salary above plan, never swept.
+  if (data.buffer && typeof data.buffer.balanceMYR === 'number') {
+    const b = data.buffer;
+    const ok = b.balanceMYR >= b.floorMYR;
+    const pct = b.floorMYR > 0 ? Math.max(2, Math.min(100, Math.round(b.balanceMYR / b.floorMYR * 100))) : 100;
+    html += `<div class="card"><h3>Buffer</h3>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:12px">
+        <div style="font-size:24px;font-weight:800;letter-spacing:-.5px">${fmt(b.balanceMYR)}</div>
+        <div class="muted" style="font-size:13px;font-weight:600">floor ${fmt(b.floorMYR)}</div></div>
+      <div class="track" style="margin-top:10px"><div class="fill" style="width:2%;background:${ok ? '#30d158' : '#ff9f0a'}" data-w="${pct}"></div></div>
+      <div style="font-size:12px;margin-top:7px;color:${ok ? '#98989f' : '#ff9f0a'}">${ok
+        ? `${fmt(b.balanceMYR - b.floorMYR)} above the floor &middot; covers one-off shocks`
+        : `${fmt(b.floorMYR - b.balanceMYR)} below the floor &mdash; salary above plan refills it first`}</div></div>`;
+  }
+
+  // Phone audit: expected real RHB + TnG = Cash + Autolog (the sum doesn't change
+  // when you settle) + card taps not yet billed. The typed balance never leaves
+  // the phone and isn't stored.
+  if (data.audit) {
+    html += `<div class="card"><h3>Balance check</h3>
+      <div class="muted" style="font-size:13px;margin-top:10px">Type your real RHB + TnG total &mdash; the month-end audit in one step.</div>
+      <div style="display:flex;gap:10px;margin-top:10px">
+        <input type="text" inputmode="decimal" id="auditReal" placeholder="e.g. 11,975.00" autocomplete="off" style="flex:1;background:#2c2c2e">
+        <button class="btn" id="auditBtn" style="width:auto;margin:0;padding:0 18px">Check</button></div>
+      <div id="auditOut"></div></div>`;
+  }
+
   // Who still owes you (rows tagged "fronted: name"; empty list = card hidden).
   if (data.fronted && data.fronted.length) {
     html += `<div class="card"><h3>Owed to you</h3>` +
@@ -264,7 +319,7 @@ function renderOverview() {
         <div class="m">${esc(f.name)}</div>
         <div class="sub">since ${esc(f.since ? fmtCoverageDate(f.since) : '?')} &middot; ${f.count} row(s)</div></div>
         <div class="val" style="color:#ffd60a">${fmt(f.outstandingMYR)}</div></div>`).join('') +
-      `</div><div class="muted" style="font-size:12px;margin-top:6px;text-align:center">Paid back? Log it with the same &ldquo;fronted: name&rdquo; note to clear it.</div>`;
+      `</div><div class="muted" style="font-size:12px;margin-top:6px;text-align:center">Paid back? Log it with Paid back, then tap the repayment and tag the same name.</div>`;
   }
 
   // Capture coverage: how far each statement channel is imported ("synced until").
@@ -281,18 +336,22 @@ function renderOverview() {
   }
 
   html += `<div class="card"><h3>Recent</h3>` +
-    (data.recent || []).map((t) => {
-      const inflow = t.amountMYR !== null && t.amountMYR < 0;
-      return `<div class="txn"><div style="min-width:0"><div class="m">${esc(t.merchant || '(no merchant)')}</div>
-        <div class="sub">${esc(t.date)} &middot; ${esc(t.category)}</div></div>
-        <div class="val${inflow ? ' in' : ''}">${t.amountMYR === null ? '—' : (inflow ? '+' + fmt(-t.amountMYR) : fmt(t.amountMYR))}</div></div>`;
-    }).join('') +
+    (data.recent || []).map((t, i) => txnRow(t, 'data-ri="' + i + '"')).join('') +
     `</div><div class="muted" style="text-align:center;margin-top:20px;font-size:12px">Updated ${esc(data.generatedAt || '')}</div>`;
   const view = $('view-overview');
   view.classList.toggle('firstpaint', firstPaint); // card entrance stagger, first load only
   view.innerHTML = html;
   animateFills('view-overview');
   if (firstPaint && data.totalMYR > 0) countUp($('bigTotal'), data.totalMYR);
+
+  view.querySelectorAll('.barrow[data-cat]').forEach((el) => {
+    el.addEventListener('click', () => openCategorySheet(el.dataset.cat));
+  });
+  view.querySelectorAll('.txn[data-ri]').forEach((el) => {
+    el.addEventListener('click', () => openRowSheet(data.recent[Number(el.dataset.ri)]));
+  });
+  const auditBtn = $('auditBtn');
+  if (auditBtn) auditBtn.addEventListener('click', runAudit);
 
   const undoBtn = $('undoBtn');
   if (undoBtn) {
@@ -316,6 +375,107 @@ function renderOverview() {
       }
     });
   }
+}
+
+// One tappable transaction line (Recent, drill-down). A 🏷 marks a fronted tag.
+function txnRow(t, attr) {
+  const inflow = t.amountMYR !== null && t.amountMYR < 0;
+  return `<div class="txn tappable" ${attr}><div style="min-width:0"><div class="m">${esc(t.merchant || '(no merchant)')}</div>
+    <div class="sub">${esc(t.date)} &middot; ${esc(t.category)}${t.fronted ? ` &middot; <span style="color:#ffd60a">fronted: ${esc(t.fronted)}</span>` : ''}</div></div>
+    <div class="val${inflow ? ' in' : ''}">${t.amountMYR === null ? '—' : (inflow ? '+' + fmt(-t.amountMYR) : fmt(t.amountMYR))}</div></div>`;
+}
+
+function showSheet(inner) {
+  const sheet = $('sheet');
+  sheet.innerHTML = `<div class="inner scroll">${inner}
+    <button class="btn" style="background:#2c2c2e" id="sheetCancel">Close</button></div>`;
+  sheet.classList.remove('hidden');
+  sheet.onclick = (e) => { if (e.target === sheet) closeSheet(); };
+  $('sheetCancel').addEventListener('click', closeSheet);
+  return sheet;
+}
+
+// Drill-down: every transaction in one category this month (backend monthRows).
+function openCategorySheet(cat) {
+  const rows = (data.monthRows || []).filter((t) => t.category === cat);
+  if (!data.monthRows) return toast('Needs the latest backend (webhook v28) — refresh');
+  const total = rows.reduce((s, t) => s + (t.amountMYR || 0), 0);
+  const cap = (data.budgets || {})[cat];
+  const sheet = showSheet(`<div style="font-size:17px;font-weight:700">${esc(cat)}</div>
+    <div class="muted" style="font-size:13px;margin-top:2px">${rows.length} transaction(s) this month &middot; ${fmt(total)}${cap ? ' of ' + fmt(cap) : ''}</div>
+    <div style="margin-top:6px">${rows.length ? rows.map((t, i) => txnRow(t, 'data-mi="' + i + '"')).join('')
+      : '<div class="muted" style="font-size:14px;padding:14px 0">Nothing yet this month.</div>'}</div>`);
+  sheet.querySelectorAll('.txn[data-mi]').forEach((el) => {
+    el.addEventListener('click', () => openRowSheet(rows[Number(el.dataset.mi)]));
+  });
+}
+
+async function setFronted(id, name) {
+  if (isDemo()) return { ok: true };
+  const res = await fetch(cfg.url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ action: 'set_fronted', key: cfg.key, id, name })
+  });
+  return res.json();
+}
+
+// One row: shows it and lets you tag who you fronted it for (any row — card taps
+// included, which the Add tab's note can't reach). Only the tag changes backend-side.
+function openRowSheet(t) {
+  if (!t) return;
+  const sheet = showSheet(`<div style="font-size:17px;font-weight:700">${esc(t.merchant || '(no merchant)')}</div>
+    <div class="muted" style="font-size:13px;margin-top:2px">${esc(t.date)} &middot; ${esc(t.category)} &middot; ${t.amountMYR === null ? 'no amount' : fmt(t.amountMYR)} &middot; ${esc(t.source)}</div>
+    <div class="muted" style="font-size:13px;margin-top:14px">${t.amountMYR !== null && t.amountMYR < 0
+      ? 'Repayment: tag it with the same name as the spend it pays back.'
+      : 'Paid this for someone? Tag them — the Owed-to-you card tracks it until they pay you back.'}</div>
+    <div style="margin-top:10px"><input type="text" id="frontedName" placeholder="Fronted for (name)" value="${esc(t.fronted || '')}" autocomplete="off" style="background:#2c2c2e"></div>
+    <div style="display:flex;gap:10px"><button class="btn" id="frontedSave">Save tag</button>
+    ${t.fronted ? '<button class="btn" id="frontedClear" style="background:#3a3a3c">Remove tag</button>' : ''}</div>`);
+  const save = async (name) => {
+    closeSheet();
+    try {
+      const r = await setFronted(t.id, name);
+      if (!r.ok) throw new Error(r.error || 'rejected');
+      t.fronted = name || null;
+      toast(name ? `${t.merchant} → fronted: ${name}` : 'Tag removed');
+      refresh();
+    } catch (err) {
+      toast('Failed: ' + err.message);
+    }
+  };
+  sheet.querySelector('#frontedSave').addEventListener('click', () => {
+    const name = $('frontedName').value.replace(/[,;|]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!name) return toast('Type a name, or use Remove tag');
+    save(name);
+  });
+  const clear = sheet.querySelector('#frontedClear');
+  if (clear) clear.addEventListener('click', () => save(''));
+}
+
+// The settlement audit, on the phone. Tolerance RM20 = normal Alipay-wallet /
+// rounding drift (the 2 Sep precedent writes larger residuals off to Buffer).
+function runAudit() {
+  const a = data.audit;
+  const real = amountValue($('auditReal').value);
+  const out = $('auditOut');
+  if (!(real >= 0)) { out.innerHTML = ''; return toast('Type the balance as a number'); }
+  const expected = Math.round((a.cashMYR + a.autologMYR + a.unbilledMYR) * 100) / 100;
+  const gap = Math.round((real - expected) * 100) / 100;
+  const tone = Math.abs(gap) <= 20 ? '#30d158' : '#ff9f0a';
+  const verdict = Math.abs(gap) <= 20
+    ? `Balanced &mdash; within RM20 (normal wallet/rounding drift).`
+    : gap < 0
+      ? `${fmt(-gap)} <b>missing</b>: money left RHB/TnG that the system doesn't know about. Usual suspect: a bank-app transfer &mdash; drop your RHB transfer history in the inbox's <b>RHB Transfers</b> folder and the report will name it.`
+      : `${fmt(gap)} <b>more</b> than expected: a repayment not logged with Paid back, a refund, or a spend counted twice.`;
+  const pending = data.reviewTotal
+    ? `<div style="color:#ff9f0a;margin-top:6px">${data.reviewTotal} uncategorized row(s) aren't in Actual yet &mdash; categorize them first for an exact check.</div>` : '';
+  out.innerHTML = `<div style="font-size:13px;margin-top:12px;line-height:1.5">
+    <div class="txn"><div class="m">Expected</div><div class="val">${fmt(expected)}</div></div>
+    <div class="sub" style="margin-top:-4px">Cash ${fmt(a.cashMYR)} &middot; Autolog ${fmt(a.autologMYR)} &middot; unbilled cards ${fmt(a.unbilledMYR)}</div>
+    <div class="txn"><div class="m">Gap</div><div class="val" style="color:${tone}">${gap >= 0 ? '+' : ''}${fmt(gap)}</div></div>
+    <div style="color:${tone}">${verdict}</div>${pending}
+    <div class="muted" style="font-size:12px;margin-top:6px">Actual figures as of ${esc(a.asOf || 'the last sync')} &mdash; anything paid since then shows up as a gap.</div></div>`;
 }
 
 // Batch selection state for the Review tab: "Select" flips the list into
