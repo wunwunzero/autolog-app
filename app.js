@@ -7,7 +7,7 @@
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
-const APP_VERSION = 23; // keep in step with index.html's app.js?v=
+const APP_VERSION = 24; // keep in step with index.html's app.js?v=
 // The backend address is fixed and not secret (auth lives in the key), so connecting
 // only truly requires the key itself.
 const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
@@ -185,13 +185,32 @@ function ringSvg(pct, color) {
 // opts.cat makes the row tappable (drill-down); opts.pacePct/paceText add the
 // month-end projection tick + caption (backend projByCat: one-offs of RM100+
 // aren't extrapolated, so a paid bill never "paces" over its envelope).
+// Category identity (style A, 27 Sep 2026): one icon + one iOS system colour per
+// canonical envelope, used everywhere a category appears. Red is deliberately
+// NOT a category colour — it's reserved for "over".
+const CATS = {
+  'Food': ['🍜', 'var(--c-orange)'], 'Groceries': ['🛒', 'var(--c-green)'], 'Transport': ['🚗', 'var(--c-blue)'],
+  'Fuel': ['⚡', 'var(--c-cyan)'], 'Health': ['💊', 'var(--c-pink)'], 'Shopping': ['🛍', 'var(--c-purple)'],
+  'Subscriptions': ['🔁', 'var(--c-indigo)'], 'Phone & Internet': ['📱', 'var(--c-gray)'], 'Family': ['🏠', 'var(--c-brown)'],
+  'Entertainment': ['🎾', 'var(--c-mint)'], 'Travel Fund': ['✈️', 'var(--c-teal)'],
+  'TRANSFER': ['↔️', 'var(--c-gray)'], 'REFUND': ['↩️', 'var(--c-green)'], 'Uncategorized': ['❔', 'var(--c-gray)'],
+  'REVIEW': ['⚠️', 'var(--c-gray)'], 'DUPLICATE?': ['⚠️', 'var(--c-gray)']
+};
+const catOf = (name) => CATS[name] || ['•', 'var(--c-gray)'];
+function catIcon(name, size) {
+  const [icon, color] = catOf(name);
+  const px = size || 29;
+  return `<span class="caticon" style="width:${px}px;height:${px}px;background:color-mix(in srgb, ${color} 18%, transparent)">${icon}</span>`;
+}
+
 function barRow(name, right, pct, color, opts) {
   opts = opts || {};
   return `<div class="barrow${opts.cat ? ' tappable' : ''}"${opts.cat ? ` data-cat="${esc(opts.cat)}"` : ''}>
-    <div class="top"><span class="name">${esc(name)}</span><span class="amt">${right}</span></div>
+    ${catIcon(name)}<div class="mid">
+    <div class="top"><span class="name">${esc(name)}</span><span class="amt" style="${opts.amtColor ? 'color:' + opts.amtColor : ''}">${right}</span></div>
     <div class="track"><div class="fill" style="width:2%;background:${color}" data-w="${pct}"></div>
     ${opts.pacePct !== undefined ? `<div class="pace" style="left:calc(${opts.pacePct}% - 1px)"></div>` : ''}</div>
-    ${opts.paceText ? `<div class="pacetext" style="color:${opts.paceOver ? 'var(--red)' : 'var(--muted)'}">${opts.paceText}</div>` : ''}</div>`;
+    ${opts.paceText ? `<div class="pacetext" style="color:${opts.paceColor || 'var(--muted)'}">${opts.paceText}</div>` : ''}</div></div>`;
 }
 
 function animateFills(rootId) {
@@ -254,45 +273,38 @@ function renderOverview() {
   }
 
   if (bCats.length) {
-    let capSum = 0, spent = 0, projSum = 0;
     const rows = bCats.map((c) => {
       const s = byCat[c] || 0;
       const proj = data.projByCat && typeof data.projByCat[c] === 'number' ? Math.max(data.projByCat[c], s) : s;
-      capSum += budgets[c];
-      spent += s;
-      projSum += proj;
       return { c, s, cap: budgets[c], proj, r: s / budgets[c], rank: proj / budgets[c] };
     }).sort((a, b) => b.rank - a.rank);
-    const capLeft = capSum - spent;
-    const ratio = capSum > 0 ? spent / capSum : 0;
-    html += `<div class="card"><h3>Budgets</h3>
-      <div style="display:flex;align-items:center;gap:18px;margin-top:14px">${ringSvg(ratio * 100, paceColor(spent, projSum, capSum))}
-      <div><div style="font-size:21px;font-weight:700">${fmt(spent)}</div>
-      <div class="muted" style="font-size:13px">of ${fmt(capSum)} budgeted</div>
-      <div style="font-size:13px;font-weight:600;margin-top:3px;color:${capLeft >= 0 ? 'var(--green)' : 'var(--red)'}">
-      ${capLeft >= 0 ? fmt(capLeft) + ' left' : fmt(-capLeft) + ' over'}</div></div></div><div style="margin-top:6px">` +
+    html += `<div class="card list"><h3>Budgets</h3>` +
       rows.map((x) => {
-        const proj = data.projByCat ? data.projByCat[x.c] : undefined;
+        const status = paceColor(x.s, x.proj, x.cap);
+        const over = x.s > x.cap + 0.005;
         const opts = { cat: x.c };
-        // Only when the projection adds something beyond what's already spent.
-        if (typeof proj === 'number' && proj > x.s + 0.5) {
-          opts.pacePct = Math.min(100, Math.round(proj / x.cap * 100));
-          opts.paceOver = proj > x.cap;
-          opts.paceText = `on pace for ${fmt(proj)}${opts.paceOver ? ` &mdash; ${fmt(proj - x.cap)} over` : ''}`;
+        if (over) opts.amtColor = 'var(--red)';
+        else if (status !== 'var(--green)') opts.amtColor = status;
+        // The projection tick + caption only when the month is heading over the cap.
+        if (!over && x.proj > x.cap + 1) {
+          opts.pacePct = 100;
+          opts.paceColor = status;
+          opts.paceText = `heading ${fmt(x.proj - x.cap)} over at this pace`;
+        } else if (typeof x.proj === 'number' && x.proj > x.s + 0.5 && x.cap > 0) {
+          opts.pacePct = Math.min(100, Math.round(x.proj / x.cap * 100));
         }
-        return barRow(x.c, `${fmt(x.s)} / ${fmt(x.cap)}`,
-          Math.max(2, Math.min(100, Math.round(x.r * 100))), paceColor(x.s, x.proj, x.cap), opts);
-      }).join('') +
-      `</div><div class="muted" style="font-size:12px;margin-top:10px">Colour = where each category lands at today's pace: green on track, amber tight, red heading over. Tap one to see its transactions.</div></div>`;
+        const right = over ? `${fmt(x.s - x.cap)} over` : `${fmt(x.cap - x.s)} left`;
+        return barRow(x.c, right, Math.max(2, Math.min(100, Math.round(x.r * 100))), over ? 'var(--red)' : catOf(x.c)[1], opts);
+      }).join('') + `</div>`;
   }
 
   const others = Object.keys(byCat).filter((c) => !budgets[c] && c !== 'REFUND')
     .map((c) => ({ c, s: byCat[c] })).sort((a, b) => b.s - a.s);
   if (others.length) {
     const max = Math.max(others[0].s, 0.01);
-    html += `<div class="card"><h3>${bCats.length ? 'Other spending' : 'Spending'}</h3><div style="margin-top:2px">` +
-      others.map((x) => barRow(x.c, fmt(x.s), Math.max(2, Math.round(x.s / max * 100)), 'var(--blue)', { cat: x.c })).join('') +
-      '</div></div>';
+    html += `<div class="card list"><h3>${bCats.length ? 'Other spending' : 'Spending'}</h3>` +
+      others.map((x) => barRow(x.c, fmt(x.s), Math.max(2, Math.round(x.s / max * 100)), catOf(x.c)[1], { cat: x.c })).join('') +
+      '</div>';
   }
 
   // Who still owes you (rows tagged "fronted: name"; empty list = card hidden).
@@ -318,7 +330,7 @@ function renderOverview() {
       `</div><div class="muted" style="font-size:12px;margin-top:8px">Newest imported transaction per source &mdash; spends after these dates arrive with your next screenshot/statement drop.</div></div>`;
   }
 
-  html += `<div class="card"><h3>Recent</h3>` +
+  html += `<div class="card list"><h3>Recent</h3>` +
     (data.recent || []).map((t, i) => txnRow(t, 'data-ri="' + i + '"')).join('') +
     `</div><div class="muted" style="text-align:center;margin-top:20px;font-size:12px">Updated ${esc(data.generatedAt || '')}</div>`;
   const view = $('view-overview');
@@ -385,7 +397,7 @@ function renderSearch(q) {
 // One tappable transaction line (Recent, drill-down). A 🏷 marks a fronted tag.
 function txnRow(t, attr) {
   const inflow = t.amountMYR !== null && t.amountMYR < 0;
-  return `<div class="txn tappable" ${attr}><div style="min-width:0"><div class="m">${esc(t.merchant || '(no merchant)')}</div>
+  return `<div class="txn tappable" ${attr}>${catIcon(t.category)}<div style="min-width:0;flex:1"><div class="m">${esc(t.merchant || '(no merchant)')}</div>
     <div class="sub">${esc(t.date)} &middot; ${esc(t.category)}${t.fronted ? ` &middot; <span style="color:var(--yellow)">fronted: ${esc(t.fronted)}</span>` : ''}</div></div>
     <div class="val${inflow ? ' in' : ''}">${t.amountMYR === null ? '—' : (inflow ? '+' + fmt(-t.amountMYR) : fmt(t.amountMYR))}</div></div>`;
 }
