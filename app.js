@@ -7,7 +7,7 @@
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
-const APP_VERSION = 22; // keep in step with index.html's app.js?v=
+const APP_VERSION = 23; // keep in step with index.html's app.js?v=
 // The backend address is fixed and not secret (auth lives in the key), so connecting
 // only truly requires the key itself.
 const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
@@ -63,7 +63,18 @@ function fmtCoverageDate(iso) {
   const p = String(iso).split('-');
   return p.length === 3 ? Number(p[2]) + ' ' + (MONTHS[Number(p[1]) - 1] || p[1]) + ' ' + p[0] : iso;
 }
-const barColor = (r) => r >= 1 ? '#ff453a' : r >= 0.8 ? '#ff9f0a' : '#30d158';
+const barColor = (r) => r >= 1 ? 'var(--red)' : r >= 0.8 ? 'var(--amber)' : 'var(--green)';
+// Pace colour (27 Sep 2026): judge where the month LANDS, not how much of the cap
+// is used — right after a sitting every cap equals "spent + what's still needed",
+// which the old %-used rule painted solid red. Over now = red; projected within
+// the cap (RM1 slack) = green; up to 10% over = amber; beyond = red.
+function paceColor(spent, proj, cap) {
+  if (!(cap > 0)) return 'var(--blue)';
+  if (spent > cap + 0.005) return 'var(--red)';
+  const landing = Math.max(spent, proj || 0);
+  if (landing <= cap + 1) return 'var(--green)';
+  return landing <= cap * 1.1 ? 'var(--amber)' : 'var(--red)';
+}
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 function toast(msg) {
@@ -162,10 +173,10 @@ async function categorize(id, category) {
 function ringSvg(pct, color) {
   const shown = Math.max(0, Math.min(100, pct)).toFixed(1);
   return `<svg width="88" height="88" viewBox="0 0 42 42" style="flex:0 0 auto">
-    <circle cx="21" cy="21" r="15.915" fill="none" stroke="#2c2c2e" stroke-width="4.2"/>
-    ${pct > 0 ? `<circle cx="21" cy="21" r="15.915" fill="none" stroke="${color}" stroke-width="4.2"
+    <circle cx="21" cy="21" r="15.915" fill="none" style="stroke:var(--fill)" stroke-width="4.2"/>
+    ${pct > 0 ? `<circle cx="21" cy="21" r="15.915" fill="none" style="stroke:${color}" stroke-width="4.2"
       stroke-linecap="round" stroke-dasharray="0 100" data-dash="${shown}" transform="rotate(-90 21 21)"/>` : ''}
-    <text x="21" y="24.5" text-anchor="middle" font-size="9.5" font-weight="700" fill="#fff"
+    <text x="21" y="24.5" text-anchor="middle" font-size="9.5" font-weight="700" style="fill:var(--text)"
       font-family="-apple-system,system-ui,sans-serif">${Math.round(pct)}%</text></svg>`;
 }
 
@@ -180,7 +191,7 @@ function barRow(name, right, pct, color, opts) {
     <div class="top"><span class="name">${esc(name)}</span><span class="amt">${right}</span></div>
     <div class="track"><div class="fill" style="width:2%;background:${color}" data-w="${pct}"></div>
     ${opts.pacePct !== undefined ? `<div class="pace" style="left:calc(${opts.pacePct}% - 1px)"></div>` : ''}</div>
-    ${opts.paceText ? `<div class="pacetext" style="color:${opts.paceOver ? '#ff453a' : '#98989f'}">${opts.paceText}</div>` : ''}</div>`;
+    ${opts.paceText ? `<div class="pacetext" style="color:${opts.paceOver ? 'var(--red)' : 'var(--muted)'}">${opts.paceText}</div>` : ''}</div>`;
 }
 
 function animateFills(rootId) {
@@ -221,45 +232,45 @@ function renderOverview() {
   const bCats = Object.keys(budgets);
   const firstPaint = !renderOverview._painted;
   renderOverview._painted = true;
-  let html = `<div id="bigTotal" style="font-size:44px;font-weight:800;letter-spacing:-1px;margin-top:6px">${fmt(data.totalMYR)}</div>
-    <div class="muted" style="font-size:13px;margin-top:2px">spent this month &middot; day ${data.dayOfMonth} of ${data.daysInMonth}</div>`;
-
-  // Safe to spend: what's left across the budgeted envelopes, per remaining day
-  // (today included). Truthful before AND after a sweep — the caps mirror
-  // Actual's real capacity, so a swept envelope simply contributes its allowance.
-  if (bCats.length) {
-    let left = 0;
-    bCats.forEach((c) => { left += Math.max(0, budgets[c] - (byCat[c] || 0)); });
-    const daysLeft = Math.max(1, data.daysInMonth - data.dayOfMonth + 1);
-    const perDay = left / daysLeft;
-    html += `<div class="card" style="padding:14px 16px"><div style="display:flex;justify-content:space-between;align-items:baseline">
-      <div><span style="font-size:22px;font-weight:800;letter-spacing:-.4px;color:${perDay < 20 ? '#ff9f0a' : '#30d158'}">${fmt(perDay)}</span>
-      <span class="muted" style="font-size:13px;font-weight:600"> / day</span></div>
-      <div class="muted" style="font-size:13px">${fmt(left)} left &middot; ${daysLeft} day${daysLeft === 1 ? '' : 's'} incl. today</div></div>
-      <div class="muted" style="font-size:12px;margin-top:4px">Safe to spend across all envelopes at an even pace &middot; one-offs (bills, transfers) come out of their own envelope first</div></div>`;
-  }
+  // Hero: safe to spend today = what's left across the budgeted envelopes ÷ days
+  // remaining (today included). Truthful before AND after a sitting's sweep —
+  // the caps mirror Actual's real capacity. Monthly spend drops to a sub-line.
+  let left = 0;
+  bCats.forEach((c) => { left += Math.max(0, budgets[c] - (byCat[c] || 0)); });
+  const daysLeft = Math.max(1, data.daysInMonth - data.dayOfMonth + 1);
+  const perDay = left / daysLeft;
+  let html = bCats.length
+    ? `<div style="margin-top:6px;display:flex;align-items:baseline;gap:8px">
+        <div id="bigTotal" style="font-size:46px;font-weight:800;letter-spacing:-1.2px;color:${perDay < 20 ? 'var(--amber)' : 'var(--text)'}">${fmt(perDay)}</div>
+        <div class="muted" style="font-size:17px;font-weight:600">/ day</div></div>
+      <div style="font-size:15px;font-weight:600;margin-top:1px">safe to spend</div>
+      <div class="muted" style="font-size:13px;margin-top:3px">${fmt(left)} left &middot; ${daysLeft} day${daysLeft === 1 ? '' : 's'} incl. today &middot; ${fmt(data.totalMYR)} spent this month</div>`
+    : `<div id="bigTotal" style="font-size:44px;font-weight:800;letter-spacing:-1px;margin-top:6px">${fmt(data.totalMYR)}</div>
+      <div class="muted" style="font-size:13px;margin-top:2px">spent this month &middot; day ${data.dayOfMonth} of ${data.daysInMonth}</div>`;
 
   const undo = pendingUndo();
   if (undo) {
-    html += `<button class="btn" id="undoBtn" style="background:#2c2c2e;margin-top:14px">&#x21a9;&#xfe0e; Undo last add &mdash; ${esc(undo.text)}</button>`;
+    html += `<button class="btn secondary" id="undoBtn" style="margin-top:14px">&#x21a9;&#xfe0e; Undo last add &mdash; ${esc(undo.text)}</button>`;
   }
 
   if (bCats.length) {
-    let capSum = 0, spent = 0;
+    let capSum = 0, spent = 0, projSum = 0;
     const rows = bCats.map((c) => {
       const s = byCat[c] || 0;
+      const proj = data.projByCat && typeof data.projByCat[c] === 'number' ? Math.max(data.projByCat[c], s) : s;
       capSum += budgets[c];
       spent += s;
-      return { c, s, cap: budgets[c], r: s / budgets[c] };
-    }).sort((a, b) => b.r - a.r);
-    const left = capSum - spent;
+      projSum += proj;
+      return { c, s, cap: budgets[c], proj, r: s / budgets[c], rank: proj / budgets[c] };
+    }).sort((a, b) => b.rank - a.rank);
+    const capLeft = capSum - spent;
     const ratio = capSum > 0 ? spent / capSum : 0;
     html += `<div class="card"><h3>Budgets</h3>
-      <div style="display:flex;align-items:center;gap:18px;margin-top:14px">${ringSvg(ratio * 100, barColor(ratio))}
+      <div style="display:flex;align-items:center;gap:18px;margin-top:14px">${ringSvg(ratio * 100, paceColor(spent, projSum, capSum))}
       <div><div style="font-size:21px;font-weight:700">${fmt(spent)}</div>
       <div class="muted" style="font-size:13px">of ${fmt(capSum)} budgeted</div>
-      <div style="font-size:13px;font-weight:600;margin-top:3px;color:${left >= 0 ? '#30d158' : '#ff453a'}">
-      ${left >= 0 ? fmt(left) + ' left' : fmt(-left) + ' over'}</div></div></div><div style="margin-top:6px">` +
+      <div style="font-size:13px;font-weight:600;margin-top:3px;color:${capLeft >= 0 ? 'var(--green)' : 'var(--red)'}">
+      ${capLeft >= 0 ? fmt(capLeft) + ' left' : fmt(-capLeft) + ' over'}</div></div></div><div style="margin-top:6px">` +
       rows.map((x) => {
         const proj = data.projByCat ? data.projByCat[x.c] : undefined;
         const opts = { cat: x.c };
@@ -270,9 +281,9 @@ function renderOverview() {
           opts.paceText = `on pace for ${fmt(proj)}${opts.paceOver ? ` &mdash; ${fmt(proj - x.cap)} over` : ''}`;
         }
         return barRow(x.c, `${fmt(x.s)} / ${fmt(x.cap)}`,
-          Math.max(2, Math.min(100, Math.round(x.r * 100))), barColor(x.r), opts);
+          Math.max(2, Math.min(100, Math.round(x.r * 100))), paceColor(x.s, x.proj, x.cap), opts);
       }).join('') +
-      `</div><div class="muted" style="font-size:12px;margin-top:10px">Tap a category to see its transactions. The white tick marks where it lands at this pace.</div></div>`;
+      `</div><div class="muted" style="font-size:12px;margin-top:10px">Colour = where each category lands at today's pace: green on track, amber tight, red heading over. Tap one to see its transactions.</div></div>`;
   }
 
   const others = Object.keys(byCat).filter((c) => !budgets[c] && c !== 'REFUND')
@@ -280,52 +291,8 @@ function renderOverview() {
   if (others.length) {
     const max = Math.max(others[0].s, 0.01);
     html += `<div class="card"><h3>${bCats.length ? 'Other spending' : 'Spending'}</h3><div style="margin-top:2px">` +
-      others.map((x) => barRow(x.c, fmt(x.s), Math.max(2, Math.round(x.s / max * 100)), '#0a84ff', { cat: x.c })).join('') +
+      others.map((x) => barRow(x.c, fmt(x.s), Math.max(2, Math.round(x.s / max * 100)), 'var(--blue)', { cat: x.c })).join('') +
       '</div></div>';
-  }
-
-  // Emergency Fund progress (bridge-mirrored daily; older backends omit the field).
-  // The bar shows progress toward a soft 3-month cushion of CORE OUTFLOW (loan,
-  // bills, living envelopes — the backend's efMonthlyBasisMYR). Budgets-tab caps
-  // were the wrong denominator: they omit the loan and include savings pots.
-  if (typeof data.efBalanceMYR === 'number') {
-    const basis = data.efMonthlyBasisMYR > 0 ? data.efMonthlyBasisMYR : null;
-    const months = basis ? data.efBalanceMYR / basis : null;
-    const goalPct = months !== null ? Math.min(100, months / 3 * 100) : 0;
-    html += `<div class="card"><h3>Emergency Fund</h3>
-      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:12px">
-        <div style="font-size:24px;font-weight:800;letter-spacing:-.5px">${fmt(data.efBalanceMYR)}</div>
-        ${months !== null ? `<div class="muted" style="font-size:13px;font-weight:600">&asymp; ${months.toFixed(1)} mo of core outflow</div>` : ''}</div>
-      ${months !== null ? `<div class="track" style="margin-top:10px"><div class="fill" style="width:2%;background:#30d158" data-w="${Math.max(2, goalPct)}"></div></div>
-      <div class="muted" style="font-size:12px;margin-top:7px">toward a 3-month cushion (${fmt(basis * 3)}) &middot; the envelope only &mdash; off-budget savings not counted</div>` : ''}</div>`;
-  }
-
-  // Buffer vs its floor (bridge-mirrored daily; floor defaults to RM2,500 — the
-  // worst single-month shock seen). Refilled by salary above plan, never swept.
-  if (data.buffer && typeof data.buffer.balanceMYR === 'number') {
-    const b = data.buffer;
-    const ok = b.balanceMYR >= b.floorMYR;
-    const pct = b.floorMYR > 0 ? Math.max(2, Math.min(100, Math.round(b.balanceMYR / b.floorMYR * 100))) : 100;
-    html += `<div class="card"><h3>Buffer</h3>
-      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:12px">
-        <div style="font-size:24px;font-weight:800;letter-spacing:-.5px">${fmt(b.balanceMYR)}</div>
-        <div class="muted" style="font-size:13px;font-weight:600">floor ${fmt(b.floorMYR)}</div></div>
-      <div class="track" style="margin-top:10px"><div class="fill" style="width:2%;background:${ok ? '#30d158' : '#ff9f0a'}" data-w="${pct}"></div></div>
-      <div style="font-size:12px;margin-top:7px;color:${ok ? '#98989f' : '#ff9f0a'}">${ok
-        ? `${fmt(b.balanceMYR - b.floorMYR)} above the floor &middot; covers one-off shocks`
-        : `${fmt(b.floorMYR - b.balanceMYR)} below the floor &mdash; salary above plan refills it first`}</div></div>`;
-  }
-
-  // Phone audit: expected real RHB + TnG = Cash + Autolog (the sum doesn't change
-  // when you settle) + card taps not yet billed. The typed balance never leaves
-  // the phone and isn't stored.
-  if (data.audit) {
-    html += `<div class="card"><h3>Balance check</h3>
-      <div class="muted" style="font-size:13px;margin-top:10px">Type your real RHB + TnG total &mdash; the month-end audit in one step.</div>
-      <div style="display:flex;gap:10px;margin-top:10px">
-        <input type="text" inputmode="decimal" id="auditReal" placeholder="e.g. 11,975.00" autocomplete="off" style="flex:1;background:#2c2c2e">
-        <button class="btn" id="auditBtn" style="width:auto;margin:0;padding:0 18px">Check</button></div>
-      <div id="auditOut"></div></div>`;
   }
 
   // Who still owes you (rows tagged "fronted: name"; empty list = card hidden).
@@ -334,7 +301,7 @@ function renderOverview() {
       data.fronted.map((f) => `<div class="txn"><div style="min-width:0">
         <div class="m">${esc(f.name)}</div>
         <div class="sub">since ${esc(f.since ? fmtCoverageDate(f.since) : '?')} &middot; ${f.count} row(s)</div></div>
-        <div class="val" style="color:#ffd60a">${fmt(f.outstandingMYR)}</div></div>`).join('') +
+        <div class="val" style="color:var(--yellow)">${fmt(f.outstandingMYR)}</div></div>`).join('') +
       `</div><div class="muted" style="font-size:12px;margin-top:6px;text-align:center">Paid back? Log it with Paid back, then tap the repayment and tag the same name.</div>`;
   }
 
@@ -346,14 +313,11 @@ function renderOverview() {
       CHANNELS.map(([k, label]) => {
         const d = data.coverage[k];
         return `<div class="txn"><div class="m">${label}</div>
-          <div class="val" style="font-weight:600;color:${d ? '#fff' : '#8e8e93'}">${d ? esc(fmtCoverageDate(d)) : 'no imports yet'}</div></div>`;
+          <div class="val" style="font-weight:600;color:${d ? 'var(--text)' : 'var(--muted)'}">${d ? esc(fmtCoverageDate(d)) : 'no imports yet'}</div></div>`;
       }).join('') +
       `</div><div class="muted" style="font-size:12px;margin-top:8px">Newest imported transaction per source &mdash; spends after these dates arrive with your next screenshot/statement drop.</div></div>`;
   }
 
-  html += `<div class="card"><h3>Search this month</h3>
-    <div style="margin-top:10px"><input type="search" id="searchBox" placeholder="Merchant or amount, e.g. ikea or 117" autocomplete="off" style="background:#2c2c2e"></div>
-    <div id="searchOut"></div></div>`;
   html += `<div class="card"><h3>Recent</h3>` +
     (data.recent || []).map((t, i) => txnRow(t, 'data-ri="' + i + '"')).join('') +
     `</div><div class="muted" style="text-align:center;margin-top:20px;font-size:12px">Updated ${esc(data.generatedAt || '')}</div>`;
@@ -361,7 +325,7 @@ function renderOverview() {
   view.classList.toggle('firstpaint', firstPaint); // card entrance stagger, first load only
   view.innerHTML = html;
   animateFills('view-overview');
-  if (firstPaint && data.totalMYR > 0) countUp($('bigTotal'), data.totalMYR);
+  if (firstPaint) { const target = bCats.length ? perDay : data.totalMYR; if (target > 0) countUp($('bigTotal'), target); }
 
   view.querySelectorAll('.barrow[data-cat]').forEach((el) => {
     el.addEventListener('click', () => openCategorySheet(el.dataset.cat));
@@ -369,10 +333,7 @@ function renderOverview() {
   view.querySelectorAll('.txn[data-ri]').forEach((el) => {
     el.addEventListener('click', () => openRowSheet(data.recent[Number(el.dataset.ri)]));
   });
-  const auditBtn = $('auditBtn');
-  if (auditBtn) auditBtn.addEventListener('click', runAudit);
-  const searchBox = $('searchBox');
-  if (searchBox) searchBox.addEventListener('input', () => renderSearch(searchBox.value));
+
 
   const undoBtn = $('undoBtn');
   if (undoBtn) {
@@ -425,14 +386,14 @@ function renderSearch(q) {
 function txnRow(t, attr) {
   const inflow = t.amountMYR !== null && t.amountMYR < 0;
   return `<div class="txn tappable" ${attr}><div style="min-width:0"><div class="m">${esc(t.merchant || '(no merchant)')}</div>
-    <div class="sub">${esc(t.date)} &middot; ${esc(t.category)}${t.fronted ? ` &middot; <span style="color:#ffd60a">fronted: ${esc(t.fronted)}</span>` : ''}</div></div>
+    <div class="sub">${esc(t.date)} &middot; ${esc(t.category)}${t.fronted ? ` &middot; <span style="color:var(--yellow)">fronted: ${esc(t.fronted)}</span>` : ''}</div></div>
     <div class="val${inflow ? ' in' : ''}">${t.amountMYR === null ? '—' : (inflow ? '+' + fmt(-t.amountMYR) : fmt(t.amountMYR))}</div></div>`;
 }
 
 function showSheet(inner) {
   const sheet = $('sheet');
   sheet.innerHTML = `<div class="inner scroll">${inner}
-    <button class="btn" style="background:#2c2c2e" id="sheetCancel">Close</button></div>`;
+    <button class="btn secondary" id="sheetCancel">Close</button></div>`;
   sheet.classList.remove('hidden');
   sheet.onclick = (e) => { if (e.target === sheet) closeSheet(); };
   $('sheetCancel').addEventListener('click', closeSheet);
@@ -450,8 +411,8 @@ function openCategorySheet(cat) {
   const histLine = months.length
     ? `<div class="muted" style="font-size:12px;margin-top:6px">${months.map((m) => {
         const p = m.split('-');
-        return `${MONTHS[Number(p[1]) - 1]}: <b style="color:#fff">${fmt(hist[m][cat] || 0)}</b>`;
-      }).join(' &middot; ')}${months.length && hist[months[0]][cat] ? (total > hist[months[0]][cat] ? ' &middot; <span style="color:#ff9f0a">up vs last month</span>' : ' &middot; <span style="color:#30d158">down vs last month</span>') : ''}</div>`
+        return `${MONTHS[Number(p[1]) - 1]}: <b style="color:var(--text)">${fmt(hist[m][cat] || 0)}</b>`;
+      }).join(' &middot; ')}${months.length && hist[months[0]][cat] ? (total > hist[months[0]][cat] ? ' &middot; <span style="color:var(--amber)">up vs last month</span>' : ' &middot; <span style="color:var(--green)">down vs last month</span>') : ''}</div>`
     : '';
   const sheet = showSheet(`<div style="font-size:17px;font-weight:700">${esc(cat)}</div>
     <div class="muted" style="font-size:13px;margin-top:2px">${rows.length} transaction(s) this month &middot; ${fmt(total)}${cap ? ' of ' + fmt(cap) : ''}</div>${histLine}
@@ -513,22 +474,22 @@ function openRowSheet(t) {
   // window; card/TnG rows are statement-matched and stay as captured.
   const editable = t.source === 'manual';
   const editBlock = editable ? `<div class="muted" style="font-size:12px;margin-top:14px;letter-spacing:.6px;text-transform:uppercase">Edit this quick-add</div>
-    <div style="margin-top:8px"><input type="text" id="editMerchant" value="${esc(t.merchant || '')}" placeholder="Merchant" autocomplete="off" style="background:#2c2c2e"></div>
+    <div style="margin-top:8px"><input type="text" id="editMerchant" value="${esc(t.merchant || '')}" placeholder="Merchant" autocomplete="off" style="background:var(--fill)"></div>
     <div style="display:flex;gap:10px;margin-top:8px">
-      <input type="text" inputmode="decimal" id="editAmount" value="${t.amountMYR === null ? '' : Math.abs(t.amountMYR)}" placeholder="Amount (RM)" style="flex:1;background:#2c2c2e" autocomplete="off">
-      <input type="date" id="editDate" value="${esc(t.date)}" style="flex:1;background:#2c2c2e"></div>
+      <input type="text" inputmode="decimal" id="editAmount" value="${t.amountMYR === null ? '' : Math.abs(t.amountMYR)}" placeholder="Amount (RM)" style="flex:1;background:var(--fill)" autocomplete="off">
+      <input type="date" id="editDate" value="${esc(t.date)}" style="flex:1;background:var(--fill)"></div>
     <button class="btn" id="editSave">Save changes</button>` : '';
   const removeBlock = freshImport(t)
     ? `<div class="muted" style="font-size:12px;margin-top:14px">Imported from a screenshot ${Math.round((Date.now() - t.createdMs) / 3600e3)}h ago.</div>
-       <button class="btn" id="notRealBtn" style="background:#3a3a3c">Not real &mdash; remove this row</button>` : '';
+       <button class="btn quiet" id="notRealBtn">Not real &mdash; remove this row</button>` : '';
   const sheet = showSheet(`<div style="font-size:17px;font-weight:700">${esc(t.merchant || '(no merchant)')}</div>
     <div class="muted" style="font-size:13px;margin-top:2px">${esc(t.date)} &middot; ${esc(t.category)} &middot; ${t.amountMYR === null ? 'no amount' : fmt(t.amountMYR)} &middot; ${esc(t.source)}</div>${editBlock}${removeBlock}
     <div class="muted" style="font-size:13px;margin-top:14px">${t.amountMYR !== null && t.amountMYR < 0
       ? 'Repayment: tag it with the same name as the spend it pays back.'
       : 'Paid this for someone? Tag them — the Owed-to-you card tracks it until they pay you back.'}</div>
-    <div style="margin-top:10px"><input type="text" id="frontedName" placeholder="Fronted for (name)" value="${esc(t.fronted || '')}" autocomplete="off" style="background:#2c2c2e"></div>
+    <div style="margin-top:10px"><input type="text" id="frontedName" placeholder="Fronted for (name)" value="${esc(t.fronted || '')}" autocomplete="off" style="background:var(--fill)"></div>
     <div style="display:flex;gap:10px"><button class="btn" id="frontedSave">Save tag</button>
-    ${t.fronted ? '<button class="btn" id="frontedClear" style="background:#3a3a3c">Remove tag</button>' : ''}</div>`);
+    ${t.fronted ? '<button class="btn quiet" id="frontedClear">Remove tag</button>' : ''}</div>`);
   const save = async (name) => {
     closeSheet();
     try {
@@ -586,20 +547,86 @@ function runAudit() {
   if (!(real >= 0)) { out.innerHTML = ''; return toast('Type the balance as a number'); }
   const expected = Math.round((a.cashMYR + a.autologMYR + a.unbilledMYR) * 100) / 100;
   const gap = Math.round((real - expected) * 100) / 100;
-  const tone = Math.abs(gap) <= 20 ? '#30d158' : '#ff9f0a';
+  const tone = Math.abs(gap) <= 20 ? 'var(--green)' : 'var(--amber)';
   const verdict = Math.abs(gap) <= 20
     ? `Balanced &mdash; within RM20 (normal wallet/rounding drift).`
     : gap < 0
       ? `${fmt(-gap)} <b>missing</b>: money left RHB/TnG that the system doesn't know about. Usual suspect: a bank-app transfer &mdash; drop your RHB transfer history in the inbox's <b>RHB Transfers</b> folder and the report will name it.`
       : `${fmt(gap)} <b>more</b> than expected: a repayment not logged with Paid back, a refund, or a spend counted twice.`;
   const pending = data.reviewTotal
-    ? `<div style="color:#ff9f0a;margin-top:6px">${data.reviewTotal} uncategorized row(s) aren't in Actual yet &mdash; categorize them first for an exact check.</div>` : '';
+    ? `<div style="color:var(--amber);margin-top:6px">${data.reviewTotal} uncategorized row(s) aren't in Actual yet &mdash; categorize them first for an exact check.</div>` : '';
   out.innerHTML = `<div style="font-size:13px;margin-top:12px;line-height:1.5">
     <div class="txn"><div class="m">Expected</div><div class="val">${fmt(expected)}</div></div>
     <div class="sub" style="margin-top:-4px">Cash ${fmt(a.cashMYR)} &middot; Autolog ${fmt(a.autologMYR)} &middot; unbilled cards ${fmt(a.unbilledMYR)}</div>
     <div class="txn"><div class="m">Gap</div><div class="val" style="color:${tone}">${gap >= 0 ? '+' : ''}${fmt(gap)}</div></div>
     <div style="color:${tone}">${verdict}</div>${pending}
     <div class="muted" style="font-size:12px;margin-top:6px">Actual figures as of ${esc(a.asOf || 'the last sync')} &mdash; anything paid since then shows up as a gap.</div></div>`;
+}
+
+// More tab (27 Sep 2026): the monthly/occasional cards, off the daily Overview —
+// search, the month-end balance check, and the savings pots.
+function renderMore() {
+  let html = '';
+  html += `<div class="card"><h3>Search this month</h3>
+    <div style="margin-top:10px"><input type="search" id="searchBox" placeholder="Merchant or amount, e.g. ikea or 117" autocomplete="off" style="background:var(--fill)"></div>
+    <div id="searchOut"></div></div>`;
+  // Emergency Fund progress (bridge-mirrored daily; older backends omit the field).
+  // The bar shows progress toward a soft 3-month cushion of CORE OUTFLOW (loan,
+  // bills, living envelopes — the backend's efMonthlyBasisMYR). Budgets-tab caps
+  // were the wrong denominator: they omit the loan and include savings pots.
+  if (typeof data.efBalanceMYR === 'number') {
+    const basis = data.efMonthlyBasisMYR > 0 ? data.efMonthlyBasisMYR : null;
+    const months = basis ? data.efBalanceMYR / basis : null;
+    const goalPct = months !== null ? Math.min(100, months / 3 * 100) : 0;
+    html += `<div class="card"><h3>Emergency Fund</h3>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:12px">
+        <div style="font-size:24px;font-weight:800;letter-spacing:-.5px">${fmt(data.efBalanceMYR)}</div>
+        ${months !== null ? `<div class="muted" style="font-size:13px;font-weight:600">&asymp; ${months.toFixed(1)} mo of core outflow</div>` : ''}</div>
+      ${months !== null ? `<div class="track" style="margin-top:10px"><div class="fill" style="width:2%;background:var(--green)" data-w="${Math.max(2, goalPct)}"></div></div>
+      <div class="muted" style="font-size:12px;margin-top:7px">toward a 3-month cushion (${fmt(basis * 3)}) &middot; the envelope only &mdash; off-budget savings not counted</div>` : ''}</div>`;
+  }
+
+  // Buffer vs its floor (bridge-mirrored daily; floor defaults to RM2,500 — the
+  // worst single-month shock seen). Refilled by salary above plan, never swept.
+  if (data.buffer && typeof data.buffer.balanceMYR === 'number') {
+    const b = data.buffer;
+    const ok = b.balanceMYR >= b.floorMYR;
+    const pct = b.floorMYR > 0 ? Math.max(2, Math.min(100, Math.round(b.balanceMYR / b.floorMYR * 100))) : 100;
+    html += `<div class="card"><h3>Buffer</h3>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:12px">
+        <div style="font-size:24px;font-weight:800;letter-spacing:-.5px">${fmt(b.balanceMYR)}</div>
+        <div class="muted" style="font-size:13px;font-weight:600">floor ${fmt(b.floorMYR)}</div></div>
+      <div class="track" style="margin-top:10px"><div class="fill" style="width:2%;background:${ok ? 'var(--green)' : 'var(--amber)'}" data-w="${pct}"></div></div>
+      <div style="font-size:12px;margin-top:7px;color:${ok ? 'var(--muted)' : 'var(--amber)'}">${ok
+        ? `${fmt(b.balanceMYR - b.floorMYR)} above the floor &middot; covers one-off shocks`
+        : `${fmt(b.floorMYR - b.balanceMYR)} below the floor &mdash; salary above plan refills it first`}</div></div>`;
+  }
+
+  // Phone audit: expected real RHB + TnG = Cash + Autolog (the sum doesn't change
+  // when you settle) + card taps not yet billed. The typed balance never leaves
+  // the phone and isn't stored.
+  if (data.audit) {
+    html += `<div class="card"><h3>Balance check</h3>
+      <div class="muted" style="font-size:13px;margin-top:10px">Type your real RHB + TnG total &mdash; the month-end audit in one step.</div>
+      <div style="display:flex;gap:10px;margin-top:10px">
+        <input type="text" inputmode="decimal" id="auditReal" placeholder="e.g. 11,975.00" autocomplete="off" style="flex:1;background:var(--fill)">
+        <button class="btn" id="auditBtn" style="width:auto;margin:0;padding:0 18px">Check</button></div>
+      <div id="auditOut"></div></div>`;
+  }
+
+  html += `<div class="muted" style="text-align:center;margin-top:20px;font-size:12px">Updated ${esc(data.generatedAt || '')}</div>`;
+  const view = $('view-more');
+  const q = $('searchBox') ? $('searchBox').value : '';
+  view.innerHTML = html;
+  animateFills('view-more');
+  const auditBtn = $('auditBtn');
+  if (auditBtn) auditBtn.addEventListener('click', runAudit);
+  const searchBox = $('searchBox');
+  if (searchBox) {
+    searchBox.value = q;
+    searchBox.addEventListener('input', () => renderSearch(searchBox.value));
+    if (q) renderSearch(q);
+  }
 }
 
 // Batch selection state for the Review tab: "Select" flips the list into
@@ -677,8 +704,8 @@ function openSheet(txns) {
     <div style="font-size:17px;font-weight:700">${head}</div>
     <div class="muted" style="font-size:13px;margin-top:2px">${sub}</div>
     <div class="chips">${cats.map((c) => `<button data-c="${esc(c)}">${esc(c)}</button>`).join('')}
-      <button data-new="1" style="color:#0a84ff">＋ New…</button></div>
-    <button class="btn" style="background:#2c2c2e" id="sheetCancel">Cancel</button></div>`;
+      <button data-new="1" style="color:var(--blue)">＋ New…</button></div>
+    <button class="btn secondary" id="sheetCancel">Cancel</button></div>`;
   sheet.classList.remove('hidden');
   // Property, not addEventListener: a {once} listener was consumed by any tap
   // INSIDE the sheet (clicks bubble), leaving the backdrop dead afterwards.
@@ -757,7 +784,7 @@ function updateBadge() {
 
 function setTab(t) {
   tab = t;
-  ['overview', 'review', 'add'].forEach((v) => {
+  ['overview', 'review', 'add', 'more'].forEach((v) => {
     $('view-' + v).classList.toggle('hidden', t !== v);
     $('tab-' + v).classList.toggle('on', t === v);
   });
@@ -873,10 +900,10 @@ async function uploadAndProcess() {
     const tc = s.transferCheck;
     const leaks = tc ? tc.unlogged.filter((u) => !u.budgetSide) : [];
     status.innerHTML = `<div style="margin-top:8px;font-size:13px;line-height:1.6">
-      <b style="color:#30d158">Done.</b> ${s.matched} matched existing rows &middot; <b>${s.added} added</b> &middot; ${s.refunds} refund(s)
-      ${s.unparsed ? ` &middot; <span style="color:#ff9f0a">${s.unparsed} line(s) unreadable</span>` : ''}
-      ${(s.unsupported || []).length ? `<br><span style="color:#ff453a">${s.unsupported.length} file(s) not processed — see the email.</span>` : ''}
-      ${tc ? `<br>RHB transfer check: ${tc.matched} matched${leaks.length ? `, <span style="color:#ff453a">${leaks.length} with no ledger entry</span>` : ''}${tc.duplicates.length ? `, <span style="color:#ff453a">${tc.duplicates.length} possible duplicate(s)</span>` : ''}` : ''}
+      <b style="color:var(--green)">Done.</b> ${s.matched} matched existing rows &middot; <b>${s.added} added</b> &middot; ${s.refunds} refund(s)
+      ${s.unparsed ? ` &middot; <span style="color:var(--amber)">${s.unparsed} line(s) unreadable</span>` : ''}
+      ${(s.unsupported || []).length ? `<br><span style="color:var(--red)">${s.unsupported.length} file(s) not processed — see the email.</span>` : ''}
+      ${tc ? `<br>RHB transfer check: ${tc.matched} matched${leaks.length ? `, <span style="color:var(--red)">${leaks.length} with no ledger entry</span>` : ''}${tc.duplicates.length ? `, <span style="color:var(--red)">${tc.duplicates.length} possible duplicate(s)</span>` : ''}` : ''}
       <br><span class="muted">Full report is in your email. New rows land in Review if they need a category.</span></div>`;
     const added = (s.addedRows || []).map((r) => Object.assign({ createdMs: Date.now() }, r));
     if (added.length) {
@@ -886,7 +913,7 @@ async function uploadAndProcess() {
       list.innerHTML = added.map((r, i) => `<div class="txn" style="gap:8px"><div style="min-width:0;flex:1"><div class="m">${esc(r.merchant)}</div>
         <div class="sub">${esc(r.date)} &middot; ${esc(r.category)}</div></div>
         <div class="val">${r.amountMYR === null ? '—' : fmt(r.amountMYR)}</div>
-        <button type="button" class="cardhead-btn" data-ai="${i}" style="color:#ff453a;padding:6px 0 6px 8px">Not real</button></div>`).join('');
+        <button type="button" class="cardhead-btn" data-ai="${i}" style="color:var(--red);padding:6px 0 6px 8px">Not real</button></div>`).join('');
       list.querySelectorAll('button[data-ai]').forEach((b) => b.addEventListener('click', () => {
         const r = added[Number(b.dataset.ai)];
         notReal(r, () => { b.closest('.txn').remove(); });
@@ -896,7 +923,7 @@ async function uploadAndProcess() {
     toast(`${s.added} new transaction(s) imported`);
     refresh();
   } catch (err) {
-    status.innerHTML = `<span style="color:#ff453a">${esc(err.message)}</span>`;
+    status.innerHTML = `<span style="color:var(--red)">${esc(err.message)}</span>`;
   } finally {
     btn.disabled = false;
   }
@@ -1002,6 +1029,7 @@ async function refresh() {
     data = fresh;
     $('month').textContent = data.month;
     renderOverview();
+    renderMore();
     renderReview();
     fillAddChips();
     fillRecentChips();
@@ -1056,6 +1084,7 @@ function boot() {
   $('tab-overview').addEventListener('click', () => setTab('overview'));
   $('tab-review').addEventListener('click', () => setTab('review'));
   $('tab-add').addEventListener('click', () => setTab('add'));
+  $('tab-more').addEventListener('click', () => setTab('more'));
   $('tab-refresh').addEventListener('click', () => { toast('Refreshing…'); refresh(); });
   $('addDate').value = localToday();
   $('addSave').addEventListener('click', saveQuickAdd);
