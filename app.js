@@ -7,7 +7,7 @@
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
-const APP_VERSION = 20; // keep in step with index.html's app.js?v=
+const APP_VERSION = 21; // keep in step with index.html's app.js?v=
 // The backend address is fixed and not secret (auth lives in the key), so connecting
 // only truly requires the key itself.
 const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
@@ -29,6 +29,7 @@ const DEMO = {
   buffer: { balanceMYR: 1810, floorMYR: 2500 },
   audit: { cashMYR: 11431.4, autologMYR: -900.2, unbilledMYR: 543.6, asOf: '2026-08-18 07:31' },
   projByCat: { Food: 246, Groceries: 470, Transport: 73.4, Subscriptions: 54.9, Fuel: 80 },
+  history: { '2026-07': { Food: 512.3, Groceries: 380, Transport: 96.5 }, '2026-06': { Food: 640.1, Groceries: 402.2, Transport: 88 } },
   monthRows: [
     { id: 'm1', date: '2026-08-18', merchant: 'Starbucks KLIA2', amountMYR: 19.5, category: 'Food', source: 'applepay', fronted: null },
     { id: 'm2', date: '2026-08-16', merchant: 'KBBQ dinner', amountMYR: 90, category: 'Food', source: 'applepay', fronted: 'Mei' },
@@ -223,6 +224,21 @@ function renderOverview() {
   let html = `<div id="bigTotal" style="font-size:44px;font-weight:800;letter-spacing:-1px;margin-top:6px">${fmt(data.totalMYR)}</div>
     <div class="muted" style="font-size:13px;margin-top:2px">spent this month &middot; day ${data.dayOfMonth} of ${data.daysInMonth}</div>`;
 
+  // Safe to spend: what's left across the budgeted envelopes, per remaining day
+  // (today included). Truthful before AND after a sweep — the caps mirror
+  // Actual's real capacity, so a swept envelope simply contributes its allowance.
+  if (bCats.length) {
+    let left = 0;
+    bCats.forEach((c) => { left += Math.max(0, budgets[c] - (byCat[c] || 0)); });
+    const daysLeft = Math.max(1, data.daysInMonth - data.dayOfMonth + 1);
+    const perDay = left / daysLeft;
+    html += `<div class="card" style="padding:14px 16px"><div style="display:flex;justify-content:space-between;align-items:baseline">
+      <div><span style="font-size:22px;font-weight:800;letter-spacing:-.4px;color:${perDay < 20 ? '#ff9f0a' : '#30d158'}">${fmt(perDay)}</span>
+      <span class="muted" style="font-size:13px;font-weight:600"> / day</span></div>
+      <div class="muted" style="font-size:13px">${fmt(left)} left &middot; ${daysLeft} day${daysLeft === 1 ? '' : 's'} incl. today</div></div>
+      <div class="muted" style="font-size:12px;margin-top:4px">Safe to spend across all envelopes at an even pace &middot; one-offs (bills, transfers) come out of their own envelope first</div></div>`;
+  }
+
   const undo = pendingUndo();
   if (undo) {
     html += `<button class="btn" id="undoBtn" style="background:#2c2c2e;margin-top:14px">&#x21a9;&#xfe0e; Undo last add &mdash; ${esc(undo.text)}</button>`;
@@ -335,6 +351,9 @@ function renderOverview() {
       `</div><div class="muted" style="font-size:12px;margin-top:8px">Newest imported transaction per source &mdash; spends after these dates arrive with your next screenshot/statement drop.</div></div>`;
   }
 
+  html += `<div class="card"><h3>Search this month</h3>
+    <div style="margin-top:10px"><input type="search" id="searchBox" placeholder="Merchant or amount, e.g. ikea or 117" autocomplete="off" style="background:#2c2c2e"></div>
+    <div id="searchOut"></div></div>`;
   html += `<div class="card"><h3>Recent</h3>` +
     (data.recent || []).map((t, i) => txnRow(t, 'data-ri="' + i + '"')).join('') +
     `</div><div class="muted" style="text-align:center;margin-top:20px;font-size:12px">Updated ${esc(data.generatedAt || '')}</div>`;
@@ -352,6 +371,8 @@ function renderOverview() {
   });
   const auditBtn = $('auditBtn');
   if (auditBtn) auditBtn.addEventListener('click', runAudit);
+  const searchBox = $('searchBox');
+  if (searchBox) searchBox.addEventListener('input', () => renderSearch(searchBox.value));
 
   const undoBtn = $('undoBtn');
   if (undoBtn) {
@@ -375,6 +396,29 @@ function renderOverview() {
       }
     });
   }
+}
+
+// Search over this month's rows (+ Recent, which can reach into last month):
+// case-insensitive merchant/category substring, or an amount that starts with
+// the typed digits. Results are the same tappable rows as everywhere else.
+function renderSearch(q) {
+  const out = $('searchOut');
+  q = String(q || '').trim().toLowerCase();
+  if (q.length < 2) { out.innerHTML = ''; return; }
+  const seen = new Set();
+  const pool = [...(data.monthRows || []), ...(data.recent || [])].filter((t) => {
+    if (seen.has(t.id)) return false;
+    seen.add(t.id);
+    const amt = t.amountMYR === null ? '' : String(Math.abs(t.amountMYR));
+    return String(t.merchant || '').toLowerCase().includes(q) || String(t.category || '').toLowerCase().includes(q) ||
+      (/^[\d.,]+$/.test(q) && amt.startsWith(q.replace(/,/g, '')));
+  }).slice(0, 30);
+  out.innerHTML = pool.length
+    ? pool.map((t, i) => txnRow(t, 'data-si="' + i + '"')).join('') + (pool.length === 30 ? '<div class="muted" style="font-size:12px;margin-top:6px">First 30 shown — narrow it down.</div>' : '')
+    : '<div class="muted" style="font-size:13px;padding:12px 0 2px">No match this month.</div>';
+  out.querySelectorAll('.txn[data-si]').forEach((el) => {
+    el.addEventListener('click', () => openRowSheet(pool[Number(el.dataset.si)]));
+  });
 }
 
 // One tappable transaction line (Recent, drill-down). A 🏷 marks a fronted tag.
@@ -401,8 +445,16 @@ function openCategorySheet(cat) {
   if (!data.monthRows) return toast('Needs the latest backend (webhook v28) — refresh');
   const total = rows.reduce((s, t) => s + (t.amountMYR || 0), 0);
   const cap = (data.budgets || {})[cat];
+  const hist = data.history || {};
+  const months = Object.keys(hist).sort().reverse();
+  const histLine = months.length
+    ? `<div class="muted" style="font-size:12px;margin-top:6px">${months.map((m) => {
+        const p = m.split('-');
+        return `${MONTHS[Number(p[1]) - 1]}: <b style="color:#fff">${fmt(hist[m][cat] || 0)}</b>`;
+      }).join(' &middot; ')}${months.length && hist[months[0]][cat] ? (total > hist[months[0]][cat] ? ' &middot; <span style="color:#ff9f0a">up vs last month</span>' : ' &middot; <span style="color:#30d158">down vs last month</span>') : ''}</div>`
+    : '';
   const sheet = showSheet(`<div style="font-size:17px;font-weight:700">${esc(cat)}</div>
-    <div class="muted" style="font-size:13px;margin-top:2px">${rows.length} transaction(s) this month &middot; ${fmt(total)}${cap ? ' of ' + fmt(cap) : ''}</div>
+    <div class="muted" style="font-size:13px;margin-top:2px">${rows.length} transaction(s) this month &middot; ${fmt(total)}${cap ? ' of ' + fmt(cap) : ''}</div>${histLine}
     <div style="margin-top:6px">${rows.length ? rows.map((t, i) => txnRow(t, 'data-mi="' + i + '"')).join('')
       : '<div class="muted" style="font-size:14px;padding:14px 0">Nothing yet this month.</div>'}</div>`);
   sheet.querySelectorAll('.txn[data-mi]').forEach((el) => {
@@ -422,10 +474,29 @@ async function setFronted(id, name) {
 
 // One row: shows it and lets you tag who you fronted it for (any row — card taps
 // included, which the Add tab's note can't reach). Only the tag changes backend-side.
+async function editQuickAdd(id, fields) {
+  if (isDemo()) return { ok: true };
+  const res = await fetch(cfg.url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ action: 'edit_quickadd', key: cfg.key, id, ...fields })
+  });
+  return res.json();
+}
+
 function openRowSheet(t) {
   if (!t) return;
+  // Your own quick-adds are editable (merchant/amount/date) after the undo
+  // window; card/TnG rows are statement-matched and stay as captured.
+  const editable = t.source === 'manual';
+  const editBlock = editable ? `<div class="muted" style="font-size:12px;margin-top:14px;letter-spacing:.6px;text-transform:uppercase">Edit this quick-add</div>
+    <div style="margin-top:8px"><input type="text" id="editMerchant" value="${esc(t.merchant || '')}" placeholder="Merchant" autocomplete="off" style="background:#2c2c2e"></div>
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <input type="text" inputmode="decimal" id="editAmount" value="${t.amountMYR === null ? '' : Math.abs(t.amountMYR)}" placeholder="Amount (RM)" style="flex:1;background:#2c2c2e" autocomplete="off">
+      <input type="date" id="editDate" value="${esc(t.date)}" style="flex:1;background:#2c2c2e"></div>
+    <button class="btn" id="editSave">Save changes</button>` : '';
   const sheet = showSheet(`<div style="font-size:17px;font-weight:700">${esc(t.merchant || '(no merchant)')}</div>
-    <div class="muted" style="font-size:13px;margin-top:2px">${esc(t.date)} &middot; ${esc(t.category)} &middot; ${t.amountMYR === null ? 'no amount' : fmt(t.amountMYR)} &middot; ${esc(t.source)}</div>
+    <div class="muted" style="font-size:13px;margin-top:2px">${esc(t.date)} &middot; ${esc(t.category)} &middot; ${t.amountMYR === null ? 'no amount' : fmt(t.amountMYR)} &middot; ${esc(t.source)}</div>${editBlock}
     <div class="muted" style="font-size:13px;margin-top:14px">${t.amountMYR !== null && t.amountMYR < 0
       ? 'Repayment: tag it with the same name as the spend it pays back.'
       : 'Paid this for someone? Tag them — the Owed-to-you card tracks it until they pay you back.'}</div>
@@ -451,6 +522,31 @@ function openRowSheet(t) {
   });
   const clear = sheet.querySelector('#frontedClear');
   if (clear) clear.addEventListener('click', () => save(''));
+  const editSave = sheet.querySelector('#editSave');
+  if (editSave) {
+    editSave.addEventListener('click', async () => {
+      const merchant = $('editMerchant').value.trim();
+      const value = amountValue($('editAmount').value);
+      const date = $('editDate').value;
+      if (!merchant) return toast('Merchant cannot be empty');
+      if (!(value > 0)) return toast('Amount must be a number more than 0');
+      const fields = {};
+      if (merchant !== t.merchant) fields.merchant = merchant;
+      const signed = t.amountMYR !== null && t.amountMYR < 0 ? -value : value; // keep a repayment negative
+      if (t.amountMYR === null || Math.abs(signed - t.amountMYR) > 0.004) fields.amount = String(signed);
+      if (date && date !== t.date) fields.date = date;
+      if (!Object.keys(fields).length) return toast('Nothing changed');
+      closeSheet();
+      try {
+        const r = await editQuickAdd(t.id, fields);
+        if (!r.ok) throw new Error(r.error || 'rejected');
+        toast('Saved — syncs to Actual on the next run');
+        refresh();
+      } catch (err) {
+        toast('Failed: ' + err.message);
+      }
+    });
+  }
 }
 
 // The settlement audit, on the phone. Tolerance RM20 = normal Alipay-wallet /
@@ -700,6 +796,78 @@ function amountValue(s) {
   return /^\d*\.?\d+$/.test(s) ? parseFloat(s) : NaN;
 }
 
+// Screenshot upload from the phone: files -> base64 -> upload_screenshot into
+// the chosen inbox folder, then process_inbox_app and show the summary here.
+// Replaces the Drive-app drop + waiting for the 07:00 run.
+const UPLOAD_FOLDERS = [['tng', 'TnG'], ['hsbc', 'HSBC'], ['rhb', 'RHB Card'], ['rhbxfer', 'RHB Transfers'], ['alipay', 'Alipay']];
+
+async function postJson(payload) {
+  const res = await fetch(cfg.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ key: cfg.key, ...payload }) });
+  return res.json();
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',')[1] || '');
+    r.onerror = () => reject(new Error('could not read ' + file.name));
+    r.readAsDataURL(file);
+  });
+}
+
+async function uploadAndProcess() {
+  const files = [...($('uploadFiles').files || [])];
+  const folder = $('uploadChips').querySelector('.sel')?.dataset.f;
+  const status = $('uploadStatus');
+  if (!folder) return toast('Pick which app the screenshots are from');
+  if (!files.length) return toast('Choose one or more screenshots');
+  const bad = files.find((f) => !/^image\/(png|jpe?g)$/i.test(f.type));
+  if (bad) return toast(bad.name + ': PNG/JPEG only (screenshots, not photos)');
+  const btn = $('uploadBtn');
+  btn.disabled = true;
+  try {
+    for (let i = 0; i < files.length; i++) {
+      status.textContent = `Uploading ${i + 1} of ${files.length}…`;
+      if (files[i].size > 8 * 1024 * 1024) throw new Error(files[i].name + ' is over 8MB');
+      const r = isDemo() ? { ok: true } : await postJson({ action: 'upload_screenshot', folder, name: files[i].name, mime: files[i].type, data: await fileToBase64(files[i]) });
+      if (!r.ok) throw new Error(r.error || 'upload rejected');
+    }
+    status.textContent = 'Processing (OCR + reconcile) — this can take a minute…';
+    const p = isDemo()
+      ? { ok: true, summary: { processed: ['Screenshot (statement): demo.png'], matched: 4, added: 2, refunds: 0, unsupported: [], unparsed: 1, transferCheck: null } }
+      : await postJson({ action: 'process_inbox_app' });
+    if (!p.ok) throw new Error(p.error || 'processing failed');
+    const s = p.summary || {};
+    if (s.nothingNew) { status.innerHTML = 'Uploaded, but nothing new to process (already handled?).'; return; }
+    const tc = s.transferCheck;
+    const leaks = tc ? tc.unlogged.filter((u) => !u.budgetSide) : [];
+    status.innerHTML = `<div style="margin-top:8px;font-size:13px;line-height:1.6">
+      <b style="color:#30d158">Done.</b> ${s.matched} matched existing rows &middot; <b>${s.added} added</b> &middot; ${s.refunds} refund(s)
+      ${s.unparsed ? ` &middot; <span style="color:#ff9f0a">${s.unparsed} line(s) unreadable</span>` : ''}
+      ${(s.unsupported || []).length ? `<br><span style="color:#ff453a">${s.unsupported.length} file(s) not processed — see the email.</span>` : ''}
+      ${tc ? `<br>RHB transfer check: ${tc.matched} matched${leaks.length ? `, <span style="color:#ff453a">${leaks.length} with no ledger entry</span>` : ''}${tc.duplicates.length ? `, <span style="color:#ff453a">${tc.duplicates.length} possible duplicate(s)</span>` : ''}` : ''}
+      <br><span class="muted">Full report is in your email. New rows land in Review if they need a category.</span></div>`;
+    $('uploadFiles').value = '';
+    toast(`${s.added} new transaction(s) imported`);
+    refresh();
+  } catch (err) {
+    status.innerHTML = `<span style="color:#ff453a">${esc(err.message)}</span>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function wireUpload() {
+  const chips = $('uploadChips');
+  if (!chips) return;
+  chips.innerHTML = UPLOAD_FOLDERS.map(([f, label]) => `<button type="button" data-f="${f}">${label}</button>`).join('');
+  chips.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+    chips.querySelectorAll('button').forEach((x) => x.classList.remove('sel'));
+    b.classList.add('sel');
+  }));
+  $('uploadBtn').addEventListener('click', uploadAndProcess);
+}
+
 function localToday() {
   const d = new Date();
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -851,6 +1019,7 @@ function boot() {
     $('addMerchant').placeholder = $('addPaidback').checked ? 'Repayment - Ali dinner' : 'Merchant';
   });
   fillAddChips();
+  wireUpload();
   renderSkeleton(); // the first fetch takes the backend 2–5s; never show a blank screen
   document.addEventListener('visibilitychange', () => { if (!document.hidden) { refresh(); healViewport(); } });
   // Keyboard dismissal is the main viewport-shrinker: heal on every input blur, and on

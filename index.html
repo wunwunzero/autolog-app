@@ -77,6 +77,8 @@
     background: #2c2c2e; border: .5px solid rgba(255,255,255,.08); color: #fff; border-radius: 100px; padding: 9px 18px;
     font-size: 13px; font-weight: 600; z-index: 40; transition: opacity .3s, transform .3s; opacity: 0;
     pointer-events: none; max-width: 88vw; }
+  input[type=search] { width: 100%; background: #1c1c1e; color: #fff; border: .5px solid #3a3a3c; border-radius: 12px;
+    padding: 13px 14px; font-size: 15px; font-family: inherit; -webkit-appearance: none; appearance: none; }
   input[type=text], input[type=date], select { width: 100%; background: #1c1c1e; color: #fff;
     border: .5px solid #3a3a3c; border-radius: 12px; padding: 13px 14px; font-size: 15px;
     font-family: inherit; -webkit-appearance: none; appearance: none; }
@@ -154,6 +156,13 @@
         Paid back? Pick the envelope you fronted from &mdash; the repayment nets it.<br>
         Fronting money? Note &ldquo;fronted: name&rdquo; on the spend AND the repayment &mdash;
         the weekly digest tracks who still owes.</div>
+      <div class="card"><h3>Upload statement screenshots</h3>
+        <div class="muted" style="font-size:13px;margin-top:8px">Screenshots of an app's transaction history. Pick the app, choose the images, done &mdash; no Drive needed.</div>
+        <div class="chips" id="uploadChips"></div>
+        <div style="margin-top:12px"><input type="file" id="uploadFiles" accept="image/png,image/jpeg" multiple style="width:100%;color:#98989f;font-size:14px"></div>
+        <button class="btn" id="uploadBtn">Upload &amp; process</button>
+        <div id="uploadStatus" class="muted" style="font-size:13px;margin-top:10px"></div>
+      </div>
     </div>
   </div>
 
@@ -167,6 +176,6 @@
   <div id="sheet" class="hidden"></div>
   <div id="toast"></div>
   <!-- bump ?v= on every app.js change: Safari/PWA caches are sticky -->
-  <script src="app.js?v=20"></script>
+  <script src="app.js?v=21"></script>
 </body>
 </html>
