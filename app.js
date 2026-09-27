@@ -7,7 +7,7 @@
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
-const APP_VERSION = 21; // keep in step with index.html's app.js?v=
+const APP_VERSION = 22; // keep in step with index.html's app.js?v=
 // The backend address is fixed and not secret (auth lives in the key), so connecting
 // only truly requires the key itself.
 const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
@@ -484,6 +484,29 @@ async function editQuickAdd(id, fields) {
   return res.json();
 }
 
+async function removeImported(id) {
+  if (isDemo()) return { ok: true, inActual: false };
+  return postJson({ action: 'remove_imported', id });
+}
+
+// A row a screenshot import added in the last 24h can be removed as "not real".
+function freshImport(t) {
+  return ['statement', 'tng', 'alipay'].includes(t.source) && t.createdMs && Date.now() - t.createdMs < 24 * 3600e3;
+}
+
+async function notReal(t, after) {
+  if (!confirm(`Remove "${t.merchant}" ${t.amountMYR === null ? '' : fmt(t.amountMYR)}?\nUse this only for a misread line that isn't a real transaction.`)) return;
+  try {
+    const r = await removeImported(t.id);
+    if (!r.ok) throw new Error(r.error || 'rejected');
+    toast(r.inActual ? 'Removed here — it had already synced: delete it in Actual too' : 'Removed');
+    if (after) after();
+    refresh();
+  } catch (err) {
+    toast('Failed: ' + err.message);
+  }
+}
+
 function openRowSheet(t) {
   if (!t) return;
   // Your own quick-adds are editable (merchant/amount/date) after the undo
@@ -495,8 +518,11 @@ function openRowSheet(t) {
       <input type="text" inputmode="decimal" id="editAmount" value="${t.amountMYR === null ? '' : Math.abs(t.amountMYR)}" placeholder="Amount (RM)" style="flex:1;background:#2c2c2e" autocomplete="off">
       <input type="date" id="editDate" value="${esc(t.date)}" style="flex:1;background:#2c2c2e"></div>
     <button class="btn" id="editSave">Save changes</button>` : '';
+  const removeBlock = freshImport(t)
+    ? `<div class="muted" style="font-size:12px;margin-top:14px">Imported from a screenshot ${Math.round((Date.now() - t.createdMs) / 3600e3)}h ago.</div>
+       <button class="btn" id="notRealBtn" style="background:#3a3a3c">Not real &mdash; remove this row</button>` : '';
   const sheet = showSheet(`<div style="font-size:17px;font-weight:700">${esc(t.merchant || '(no merchant)')}</div>
-    <div class="muted" style="font-size:13px;margin-top:2px">${esc(t.date)} &middot; ${esc(t.category)} &middot; ${t.amountMYR === null ? 'no amount' : fmt(t.amountMYR)} &middot; ${esc(t.source)}</div>${editBlock}
+    <div class="muted" style="font-size:13px;margin-top:2px">${esc(t.date)} &middot; ${esc(t.category)} &middot; ${t.amountMYR === null ? 'no amount' : fmt(t.amountMYR)} &middot; ${esc(t.source)}</div>${editBlock}${removeBlock}
     <div class="muted" style="font-size:13px;margin-top:14px">${t.amountMYR !== null && t.amountMYR < 0
       ? 'Repayment: tag it with the same name as the spend it pays back.'
       : 'Paid this for someone? Tag them — the Owed-to-you card tracks it until they pay you back.'}</div>
@@ -522,6 +548,8 @@ function openRowSheet(t) {
   });
   const clear = sheet.querySelector('#frontedClear');
   if (clear) clear.addEventListener('click', () => save(''));
+  const notRealBtn = sheet.querySelector('#notRealBtn');
+  if (notRealBtn) notRealBtn.addEventListener('click', () => notReal(t, closeSheet));
   const editSave = sheet.querySelector('#editSave');
   if (editSave) {
     editSave.addEventListener('click', async () => {
@@ -836,6 +864,9 @@ async function uploadAndProcess() {
     const p = isDemo()
       ? { ok: true, summary: { processed: ['Screenshot (statement): demo.png'], matched: 4, added: 2, refunds: 0, unsupported: [], unparsed: 1, transferCheck: null } }
       : await postJson({ action: 'process_inbox_app' });
+    if (isDemo()) p.summary.addedRows = [
+      { id: 'x1', date: '2026-08-18', merchant: 'SUBWAY-PETRONAS TTDI', amountMYR: 1300, category: 'Food', source: 'statement', createdMs: Date.now() },
+      { id: 'x2', date: '2026-08-18', merchant: 'AEON CO-BANDAR PUCHON', amountMYR: 23.7, category: 'Groceries', source: 'statement', createdMs: Date.now() }];
     if (!p.ok) throw new Error(p.error || 'processing failed');
     const s = p.summary || {};
     if (s.nothingNew) { status.innerHTML = 'Uploaded, but nothing new to process (already handled?).'; return; }
@@ -847,6 +878,20 @@ async function uploadAndProcess() {
       ${(s.unsupported || []).length ? `<br><span style="color:#ff453a">${s.unsupported.length} file(s) not processed — see the email.</span>` : ''}
       ${tc ? `<br>RHB transfer check: ${tc.matched} matched${leaks.length ? `, <span style="color:#ff453a">${leaks.length} with no ledger entry</span>` : ''}${tc.duplicates.length ? `, <span style="color:#ff453a">${tc.duplicates.length} possible duplicate(s)</span>` : ''}` : ''}
       <br><span class="muted">Full report is in your email. New rows land in Review if they need a category.</span></div>`;
+    const added = (s.addedRows || []).map((r) => Object.assign({ createdMs: Date.now() }, r));
+    if (added.length) {
+      status.innerHTML += `<div class="muted" style="font-size:12px;margin-top:12px;letter-spacing:.6px;text-transform:uppercase">Added &mdash; glance for misreads</div>
+        <div id="addedList"></div>`;
+      const list = $('addedList');
+      list.innerHTML = added.map((r, i) => `<div class="txn" style="gap:8px"><div style="min-width:0;flex:1"><div class="m">${esc(r.merchant)}</div>
+        <div class="sub">${esc(r.date)} &middot; ${esc(r.category)}</div></div>
+        <div class="val">${r.amountMYR === null ? '—' : fmt(r.amountMYR)}</div>
+        <button type="button" class="cardhead-btn" data-ai="${i}" style="color:#ff453a;padding:6px 0 6px 8px">Not real</button></div>`).join('');
+      list.querySelectorAll('button[data-ai]').forEach((b) => b.addEventListener('click', () => {
+        const r = added[Number(b.dataset.ai)];
+        notReal(r, () => { b.closest('.txn').remove(); });
+      }));
+    }
     $('uploadFiles').value = '';
     toast(`${s.added} new transaction(s) imported`);
     refresh();
