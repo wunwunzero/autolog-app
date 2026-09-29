@@ -20,10 +20,13 @@
      system palette for each mode (the light variants are darker for contrast). */
   :root { color-scheme: light dark;
     --bg: #000; --text: #fff; --muted: #98989f; --fill: #2c2c2e; --fill2: #3a3a3c;
-    --card-a: #1d1d20; --card-b: #19191c; --card-line: rgba(255,255,255,.07); --chip-line: rgba(255,255,255,.06);
+    --card-a: #1d1d20; --card-b: #19191c; --card-line: rgba(255,255,255,.07); --chip-line: rgba(255,255,255,.14);
     --sheet: #1c1c1e; --nav: rgba(18,18,20,.92); --hair: #2c2c2e; --input: #1c1c1e; --scrim: rgba(0,0,0,.6);
     --toast: #2c2c2e; --skel-a: #1c1c1e; --skel-b: #27272b; --tick: #fff;
     --green: #30d158; --amber: #ff9f0a; --red: #ff453a; --blue: #0a84ff; --yellow: #ffd60a;
+    /* Filled controls with white text: a deeper blue/red than the system tints,
+       which only reach 3.4-4.0:1 behind white (critique 29 Sep 2026). */
+    --accent: #0066d6; --badge: #d70015; --placeholder: #98989f; --c-gold: #ffd60a;
     --c-orange: #ff9f0a; --c-green: #30d158; --c-blue: #0a84ff; --c-cyan: #64d2ff; --c-pink: #ff375f; --c-purple: #bf5af2;
     --c-indigo: #5e5ce6; --c-gray: #98989d; --c-brown: #ac8e68; --c-mint: #63e6e2; --c-teal: #40c8e0; --group: #1c1c1e; }
   @media (prefers-color-scheme: light) {
@@ -31,7 +34,10 @@
       --card-a: #fff; --card-b: #fff; --card-line: rgba(0,0,0,.06); --chip-line: rgba(0,0,0,.04);
       --sheet: #fff; --nav: rgba(249,249,251,.92); --hair: #d8d8dc; --input: #fff; --scrim: rgba(0,0,0,.35);
       --toast: #1c1c1e; --skel-a: #e5e5ea; --skel-b: #f2f2f7; --tick: #1c1c1e;
-      --green: #248a3d; --amber: #c93400; --red: #d70015; --blue: #007aff; --yellow: #a05a00;
+      /* Light status colours: >=5:1 on white; amber is kept brown-orange so it
+         never reads as red, and the owed-money yellow is an olive gold. */
+      --green: #1f7a35; --amber: #a15c00; --red: #d70015; --blue: #0066d6; --yellow: #7d6400;
+      --placeholder: #5f5f64; --c-gold: #d4a000;
       --c-orange: #ff9500; --c-green: #34c759; --c-blue: #007aff; --c-cyan: #32ade6; --c-pink: #ff2d55; --c-purple: #af52de;
       --c-indigo: #5856d6; --c-gray: #8e8e93; --c-brown: #a2845e; --c-mint: #00c7be; --c-teal: #30b0c7; --group: #fff; }
   }
@@ -48,8 +54,9 @@
   /* Style A (iOS grouped lists): flat groups, section title sitting ABOVE each
      group (absolutely placed h3, so every card gets it without restructuring). */
   .card { background: var(--group); border-radius: 14px; padding: 14px 16px 15px; margin-top: 40px; position: relative; }
-  .card h3 { position: absolute; left: 6px; top: -24px; margin: 0; font-size: 13px; font-weight: 400;
-    color: var(--muted); letter-spacing: 0; text-transform: none; }
+  .card h3 { position: absolute; left: 6px; right: 6px; top: -24px; margin: 0; font-size: 13px; font-weight: 400;
+    color: var(--muted); letter-spacing: 0; text-transform: none;
+    display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
   .card.list { padding: 2px 0 2px 14px; }
   .caticon { flex: 0 0 auto; border-radius: 8px; display: inline-grid; place-items: center; font-size: 15px; line-height: 1; }
   #bigTotal, .barrow .amt, .txn .val, .num { font-family: ui-rounded, 'SF Pro Rounded', -apple-system, system-ui, sans-serif; }
@@ -80,10 +87,16 @@
   .txn .val { font-size: 15px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .txn .val.in { color: var(--green); }
   .txn.tappable:active { opacity: .6; }
-  .selmark { width: 20px; height: 20px; border-radius: 100px; border: 1.5px solid var(--fill2); flex: 0 0 auto; }
-  .selmark.on { background: var(--blue); border-color: var(--blue); }
-  .cardhead-btn { background: none; border: 0; color: var(--blue); font-family: inherit; font-size: 12px;
-    font-weight: 600; text-transform: none; letter-spacing: 0; padding: 0; }
+  /* Selected = filled + a tick, never colour alone. */
+  .selmark { width: 22px; height: 22px; border-radius: 100px; border: 1.5px solid var(--fill2); flex: 0 0 auto;
+    display: grid; place-items: center; color: #fff; }
+  .selmark svg { width: 13px; height: 13px; visibility: hidden; }
+  .selmark.on { background: var(--accent); border-color: var(--accent); }
+  .selmark.on svg { visibility: visible; }
+  /* Heading-row text button: padding widens the hit area to ~44pt without
+     moving the text (negative margins cancel it out). */
+  .cardhead-btn { background: none; border: 0; color: var(--blue); font-family: inherit; font-size: 15px;
+    font-weight: 600; text-transform: none; letter-spacing: 0; padding: 14px 4px 12px 18px; margin: -14px -4px -12px 0; }
   /* Floating pill tab bar */
   nav { position: fixed; left: 16px; right: 16px; bottom: calc(12px + env(safe-area-inset-bottom)); display: flex;
     background: var(--nav); -webkit-backdrop-filter: blur(20px) saturate(1.6); backdrop-filter: blur(20px) saturate(1.6);
@@ -92,35 +105,71 @@
   nav button { flex: 1; background: none; border: 0; color: var(--muted); font-size: 11px; font-weight: 600;
     display: flex; flex-direction: column; align-items: center; gap: 3px; font-family: inherit; }
   nav button.on { color: var(--blue); }
+  nav button { min-height: 44px; }
   /* SVG icons, not text glyphs: iOS renders glyphs like ☑︎ as full-colour emoji at its
      own size, which bloats and misaligns the bar. SVGs tint via currentColor. */
   nav .ico { position: relative; display: inline-flex; height: 22px; }
   nav .ico svg { width: 22px; height: 22px; }
-  nav .badge { position: absolute; top: -5px; right: -12px; background: var(--red); color: #fff;
+  nav .badge { position: absolute; top: -5px; right: -12px; background: var(--badge); color: #fff;
     border-radius: 100px; font-size: 10px; font-weight: 700; padding: 1px 5px; }
   .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
   .chips button { background: var(--fill); border: .5px solid var(--chip-line); color: var(--text);
     border-radius: 100px; padding: 9px 15px; font-size: 14px; font-weight: 600; font-family: inherit;
     transition: transform .08s; }
-  .chips button:active { background: var(--blue); color: #fff; transform: scale(.95); }
+  .chips button:active { background: var(--accent); color: #fff; transform: scale(.95); }
+  .chips .ci { margin-right: 5px; }
+  .chips .more { background: none; border-style: dashed; border-color: var(--fill2); color: var(--blue); }
+  .chips-more { display: contents; }
   #sheet { position: fixed; inset: 0; background: var(--scrim); display: flex; align-items: flex-end; z-index: 30; }
   #sheet .inner { background: var(--sheet); border-radius: 20px 20px 0 0; width: 100%;
     padding: 18px 16px calc(24px + env(safe-area-inset-bottom)); }
   #toast { position: fixed; left: 50%; transform: translateX(-50%) translateY(8px); bottom: calc(100px + env(safe-area-inset-bottom));
     background: var(--toast); border: .5px solid rgba(255,255,255,.08); color: #fff; border-radius: 100px; padding: 9px 18px;
     font-size: 13px; font-weight: 600; z-index: 40; transition: opacity .3s, transform .3s; opacity: 0;
-    pointer-events: none; max-width: 88vw; }
+    pointer-events: none; width: max-content; max-width: 88vw; display: flex; align-items: center; gap: 14px; }
+  #toast .toast-act { background: none; border: 0; color: #64b5ff; font: inherit; font-weight: 700;
+    padding: 12px 6px; margin: -12px -8px -12px 0; white-space: nowrap; }
+  ::placeholder { color: var(--placeholder); opacity: 1; }
+  /* Keyboard / switch-control focus (never shown for taps). */
+  :focus-visible { outline: 2.5px solid var(--blue); outline-offset: 2px; border-radius: 10px; }
+  [tabindex="-1"]:focus { outline: none; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  label.btn:focus-within { outline: 2.5px solid var(--blue); outline-offset: 2px; }
+  .fieldlabel { font-size: 13px; color: var(--muted); margin: 16px 0 -6px 2px; }
+  /* Spend | Paid back segmented control (Add tab). */
+  .seg { display: flex; background: var(--fill); border-radius: 10px; padding: 2px; margin-top: 16px; }
+  .seg button { flex: 1; background: none; border: 0; border-radius: 8px; padding: 9px 0; min-height: 36px;
+    color: var(--text); font: inherit; font-size: 14px; font-weight: 600; }
+  .seg button[aria-pressed="true"] { background: var(--group); box-shadow: 0 1px 4px rgba(0,0,0,.18); }
+  #addAmount { font-size: 22px; font-weight: 700; font-family: ui-rounded, 'SF Pro Rounded', -apple-system, system-ui, sans-serif; }
+  details.help { margin-top: 18px; font-size: 13px; color: var(--muted); }
+  details.help summary { text-align: center; color: var(--blue); font-weight: 600; padding: 12px 0; list-style: none; }
+  details.help summary::-webkit-details-marker { display: none; }
+  details.help ul { margin: 4px 0 0; padding-left: 18px; line-height: 1.55; }
+  /* Import review: flagged rows + row actions. */
+  .flag { display: inline-block; font-size: 12px; font-weight: 600; color: var(--amber);
+    background: color-mix(in srgb, var(--amber) 14%, transparent); border-radius: 6px; padding: 2px 7px; margin-top: 4px; }
+  .rowacts { display: flex; gap: 8px; flex: 0 0 auto; }
+  .rowacts button { background: var(--fill); border: 0; color: var(--blue); font: inherit; font-size: 14px; font-weight: 600;
+    border-radius: 10px; padding: 0 12px; min-height: 36px; min-width: 44px; }
+  .rowacts button.danger { color: var(--red); }
+  .txn.imported { flex-wrap: wrap; row-gap: 8px; }
+  .txn.imported .rowacts { flex-basis: 100%; justify-content: flex-end; }
+  .notice { border: 1.5px solid color-mix(in srgb, var(--amber) 55%, transparent); }
+  .notice .txn .rowacts button { color: var(--text); }
   input[type=search] { width: 100%; background: var(--input); color: var(--text); border: .5px solid var(--fill2); border-radius: 12px;
     padding: 13px 14px; font-size: 15px; font-family: inherit; -webkit-appearance: none; appearance: none; }
   input[type=text], input[type=date], select { width: 100%; background: var(--input); color: var(--text);
     border: .5px solid var(--fill2); border-radius: 12px; padding: 13px 14px; font-size: 15px;
     font-family: inherit; -webkit-appearance: none; appearance: none; }
   #view-add input[type=text], #view-add input[type=date], #view-add select { background: var(--fill); border-color: var(--fill2); }
-  .chips button.sel { background: var(--blue); color: #fff; }
-  .btn { width: 100%; background: var(--blue); color: #fff; border: 0; border-radius: 12px; padding: 14px;
+  .chips button.sel { background: var(--accent); color: #fff; }
+  .btn { width: 100%; background: var(--accent); color: #fff; border: 0; border-radius: 12px; padding: 14px;
     font-size: 16px; font-weight: 700; margin-top: 14px; font-family: inherit; transition: transform .08s; }
   .btn:active { transform: scale(.98); }
   .btn.secondary { background: var(--fill); color: var(--text); }
+  .btn.danger { background: var(--badge); color: #fff; }
+  label.btn { display: block; text-align: center; }
   .btn.quiet { background: var(--fill2); color: var(--text); }
   .btn:disabled { opacity: .4; }
   #view-overview > div:first-child { font-variant-numeric: tabular-nums; }
@@ -157,7 +206,7 @@
     <div class="muted" style="font-size:15px;line-height:1.5">Type your <b>12-character view key</b>
       (sheet &rarr; Config tab &rarr; DASH_KEY row) &mdash; or paste any connect link, like the one from
       the &ldquo;connect your phone app&rdquo; email. Stored only on this device.</div>
-    <div style="margin-top:20px"><input type="text" id="connect" placeholder="key or connect link" autocomplete="off" autocapitalize="none" autocorrect="off"></div>
+    <div style="margin-top:20px"><input type="text" id="connect" aria-label="View key or connect link" placeholder="key or connect link" autocomplete="off" autocapitalize="none" autocorrect="off"></div>
     <button class="btn" id="connectBtn">Connect</button>
     <div class="muted" id="setupVersion" style="text-align:center;font-size:12px;margin-top:18px"></div>
   </div>
@@ -170,53 +219,62 @@
     </header>
     <div id="view-overview"></div>
     <div id="view-review" class="hidden"></div>
-    <div id="view-more" class="hidden"></div>
+    <div id="view-more" class="hidden">
+      <div class="card"><h3>Import screenshots</h3>
+        <div class="muted" style="font-size:13px">Screenshots of an app&rsquo;s transaction history &mdash; pick the app, choose the images.</div>
+        <div class="chips" id="uploadChips" role="group" aria-label="Which app"></div>
+        <label class="btn secondary" style="margin-top:12px">Choose screenshots
+          <input type="file" id="uploadFiles" class="sr-only" accept="image/png,image/jpeg" multiple></label>
+        <div id="uploadPicked" class="muted" style="font-size:13px;margin-top:8px;text-align:center" aria-live="polite"></div>
+        <button class="btn" id="uploadBtn">Upload &amp; process</button>
+        <div id="uploadStatus" style="font-size:13px;margin-top:10px" aria-live="polite"></div>
+      </div>
+      <div id="more-dyn"></div>
+    </div>
     <div id="view-add" class="hidden">
-      <div class="card"><h3>Log a transaction</h3>
-        <div class="chips hidden" id="recentChips" style="margin-top:12px"></div>
-        <div style="margin-top:14px"><input type="text" id="addMerchant" placeholder="Merchant" autocomplete="off"></div>
-        <div style="display:flex;gap:10px;margin-top:10px">
-          <input type="text" inputmode="decimal" id="addAmount" placeholder="Amount" style="flex:1" autocomplete="off">
-          <select id="addCurrency" style="width:104px">
+      <div class="seg" role="group" aria-label="What are you logging">
+        <button type="button" id="modeSpend" aria-pressed="true">Spend</button>
+        <button type="button" id="modePaid" aria-pressed="false">Paid back</button></div>
+      <div class="card"><h3 id="addTitle">Log a spend</h3>
+        <div class="chips hidden" id="recentChips" role="group" aria-label="Repeat a recent quick-add" style="margin-top:0"></div>
+        <div style="display:flex;gap:10px;margin-top:12px">
+          <input type="text" inputmode="decimal" id="addAmount" aria-label="Amount" placeholder="0.00" style="flex:1" autocomplete="off">
+          <select id="addCurrency" aria-label="Currency" style="width:96px">
             <option selected>MYR</option><option>SGD</option><option>USD</option><option>THB</option>
             <option>IDR</option><option>VND</option><option>EUR</option><option>GBP</option>
             <option>JPY</option><option>AUD</option>
           </select>
         </div>
-        <div style="margin-top:10px"><input type="date" id="addDate"></div>
-        <div style="margin-top:10px"><input type="text" id="addNote" placeholder="Note (optional) — &quot;fronted: Ali&quot; tracks repayment" autocomplete="off"></div>
-        <label style="display:flex;align-items:center;gap:10px;margin-top:14px;font-size:15px">
-          <input type="checkbox" id="addPaidback" style="width:20px;height:20px;accent-color:var(--green);margin:0">
-          Paid back &mdash; someone repaid money I fronted</label>
-        <div class="chips" id="addChips"></div>
-        <button class="btn" id="addSave">Log transaction</button>
+        <div style="margin-top:10px"><input type="text" id="addMerchant" aria-label="Merchant" placeholder="Merchant" autocomplete="off"></div>
+        <div class="fieldlabel" id="catLabel">Category &mdash; optional, the rules decide</div>
+        <div class="chips" id="addChips" role="group" aria-labelledby="catLabel"></div>
+        <div class="fieldlabel" id="frontLabel">Paid for someone? (optional)</div>
+        <div style="margin-top:14px"><input type="text" id="addFronted" aria-labelledby="frontLabel" placeholder="Their name" autocomplete="off"></div>
+        <div class="chips hidden" id="nameChips" role="group" aria-label="People who owe you" style="margin-top:10px"></div>
+        <div style="display:flex;gap:10px;margin-top:14px">
+          <input type="date" id="addDate" aria-label="Date" style="flex:1">
+          <input type="text" id="addNote" aria-label="Note" placeholder="Note (optional)" style="flex:1.3" autocomplete="off"></div>
+        <button class="btn" id="addSave">Log spend</button>
       </div>
-      <div class="muted" style="font-size:13px;text-align:center;margin-top:14px">
-        Same pipeline as Apple Pay taps &mdash; dedup, alerts and budgets included.<br>
-        No category picked? The rules decide, or it lands in Review.<br>
-        Paid back? Pick the envelope you fronted from &mdash; the repayment nets it.<br>
-        Fronting money? Note &ldquo;fronted: name&rdquo; on the spend AND the repayment &mdash;
-        the weekly digest tracks who still owes.</div>
-      <div class="card"><h3>Upload statement screenshots</h3>
-        <div class="muted" style="font-size:13px;margin-top:8px">Screenshots of an app's transaction history. Pick the app, choose the images, done &mdash; no Drive needed.</div>
-        <div class="chips" id="uploadChips"></div>
-        <div style="margin-top:12px"><input type="file" id="uploadFiles" accept="image/png,image/jpeg" multiple style="width:100%;color:var(--muted);font-size:14px"></div>
-        <button class="btn" id="uploadBtn">Upload &amp; process</button>
-        <div id="uploadStatus" class="muted" style="font-size:13px;margin-top:10px"></div>
-      </div>
+      <details class="help"><summary>How logging works</summary><ul>
+        <li>Same pipeline as Apple Pay taps &mdash; dedup, alerts and budgets included.</li>
+        <li>No category? The rules decide, or it lands in Review.</li>
+        <li>Paid for a friend? Put their name in &ldquo;Paid for someone&rdquo; &mdash; Overview&rsquo;s Owed card tracks it.</li>
+        <li>They paid you back? Switch to <b>Paid back</b>, pick their name and the envelope you paid from &mdash; the repayment nets it.</li>
+      </ul></details>
     </div>
   </div>
 
-  <nav id="nav" class="hidden">
-    <button id="tab-overview" class="on"><span class="ico"><svg viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="11" cy="11" r="7.8"/><circle cx="11" cy="11" r="2.2" fill="currentColor" stroke="none"/></svg></span>Overview</button>
-    <button id="tab-add"><span class="ico"><svg viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M11 3.5v15M3.5 11h15"/></svg></span>Add</button>
-    <button id="tab-review"><span class="ico"><svg viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="16" height="16" rx="4"/><path d="M7.2 11.2l2.6 2.6 5-5.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="badge" class="badge hidden"></span></span>Review</button>
-    <button id="tab-more"><span class="ico"><svg viewBox="0 0 22 22" fill="currentColor"><circle cx="5" cy="11" r="2"/><circle cx="11" cy="11" r="2"/><circle cx="17" cy="11" r="2"/></svg></span>More</button>
+  <nav id="nav" class="hidden" aria-label="Tabs">
+    <button id="tab-overview" class="on"><span class="ico" aria-hidden="true"><svg viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="11" cy="11" r="7.8"/><circle cx="11" cy="11" r="2.2" fill="currentColor" stroke="none"/></svg></span>Overview</button>
+    <button id="tab-add"><span class="ico" aria-hidden="true"><svg viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M11 3.5v15M3.5 11h15"/></svg></span>Add</button>
+    <button id="tab-review"><span class="ico"><svg aria-hidden="true" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="16" height="16" rx="4"/><path d="M7.2 11.2l2.6 2.6 5-5.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="badge" class="badge hidden"></span></span>Review</button>
+    <button id="tab-more"><span class="ico" aria-hidden="true"><svg viewBox="0 0 22 22" fill="currentColor"><circle cx="5" cy="11" r="2"/><circle cx="11" cy="11" r="2"/><circle cx="17" cy="11" r="2"/></svg></span>More</button>
   </nav>
 
   <div id="sheet" class="hidden"></div>
-  <div id="toast"></div>
+  <div id="toast" role="status" aria-live="polite"></div>
   <!-- bump ?v= on every app.js change: Safari/PWA caches are sticky -->
-  <script src="app.js?v=24"></script>
+  <script src="app.js?v=25"></script>
 </body>
 </html>
