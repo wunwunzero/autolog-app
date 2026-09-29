@@ -22,11 +22,14 @@
     --bg: #000; --text: #fff; --muted: #98989f; --fill: #2c2c2e; --fill2: #3a3a3c;
     --card-a: #1d1d20; --card-b: #19191c; --card-line: rgba(255,255,255,.07); --chip-line: rgba(255,255,255,.14);
     --sheet: #1c1c1e; --nav: rgba(18,18,20,.92); --hair: #2c2c2e; --input: #1c1c1e; --scrim: rgba(0,0,0,.6);
-    --toast: #2c2c2e; --skel-a: #1c1c1e; --skel-b: #27272b; --tick: #fff;
+    --toast: #3a3a3c; --skel-a: #1c1c1e; --skel-b: #27272b; --tick: #fff;
     --green: #30d158; --amber: #ff9f0a; --red: #ff453a; --blue: #0a84ff; --yellow: #ffd60a;
     /* Filled controls with white text: a deeper blue/red than the system tints,
        which only reach 3.4-4.0:1 behind white (critique 29 Sep 2026). */
     --accent: #0066d6; --badge: #d70015; --placeholder: #98989f; --c-gold: #ffd60a;
+    /* On-track budget bars: one neutral tint, so amber/red on a bar only ever
+       mean "heading over"/"over" (category colour lives on the icon tile). */
+    --bar: #8e9aab; --seg-thumb: #636366;
     --c-orange: #ff9f0a; --c-green: #30d158; --c-blue: #0a84ff; --c-cyan: #64d2ff; --c-pink: #ff375f; --c-purple: #bf5af2;
     --c-indigo: #5e5ce6; --c-gray: #98989d; --c-brown: #ac8e68; --c-mint: #63e6e2; --c-teal: #40c8e0; --group: #1c1c1e; }
   @media (prefers-color-scheme: light) {
@@ -37,7 +40,7 @@
       /* Light status colours: >=5:1 on white; amber is kept brown-orange so it
          never reads as red, and the owed-money yellow is an olive gold. */
       --green: #1f7a35; --amber: #a15c00; --red: #d70015; --blue: #0066d6; --yellow: #7d6400;
-      --placeholder: #5f5f64; --c-gold: #d4a000;
+      --placeholder: #5f5f64; --c-gold: #d4a000; --bar: #7d8a9c; --seg-thumb: #fff;
       --c-orange: #ff9500; --c-green: #34c759; --c-blue: #007aff; --c-cyan: #32ade6; --c-pink: #ff2d55; --c-purple: #af52de;
       --c-indigo: #5856d6; --c-gray: #8e8e93; --c-brown: #a2845e; --c-mint: #00c7be; --c-teal: #30b0c7; --group: #fff; }
   }
@@ -82,6 +85,14 @@
   .fill { height: 4px; border-radius: 2px; transition: width .5s cubic-bezier(.22,.9,.34,1); }
   .txn { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-top: .5px solid var(--hair); }
   .txn:first-of-type { border-top: 0; padding-top: 14px; }
+  .card:not(.list) .txn:first-of-type { padding-top: 2px; }
+  .txn .chev { color: var(--muted); font-size: 22px; line-height: 1; margin-left: -4px; }
+  .txn.imported .m { white-space: normal; overflow-wrap: anywhere; }
+  .issues { margin: 4px 0 6px; padding-left: 18px; color: var(--text); font-size: 12px; line-height: 1.5; }
+  details.issues { padding-left: 0; }
+  details.issues summary { font-weight: 600; padding: 8px 0; }
+  details.issues ul { padding-left: 18px; margin: 0 0 4px; }
+  .linkbtn { background: none; border: 0; color: var(--blue); font: inherit; font-size: 14px; font-weight: 600; padding: 12px 2px; margin-top: 4px; }
   .txn .m { font-size: 15px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .txn .sub { font-size: 12px; color: var(--muted); margin-top: 1px; }
   .txn .val { font-size: 15px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -93,6 +104,8 @@
   .selmark svg { width: 13px; height: 13px; visibility: hidden; }
   .selmark.on { background: var(--accent); border-color: var(--accent); }
   .selmark.on svg { visibility: visible; }
+  .selbox { flex: 0 0 29px; width: 29px; display: grid; place-items: center; }
+  .card.list .txn:not(:first-of-type) .selbox { margin-left: -41px; }
   /* Heading-row text button: padding widens the hit area to ~44pt without
      moving the text (negative margins cancel it out). */
   .cardhead-btn { background: none; border: 0; color: var(--blue); font-family: inherit; font-size: 15px;
@@ -115,7 +128,8 @@
   .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
   .chips button { background: var(--fill); border: .5px solid var(--chip-line); color: var(--text);
     border-radius: 100px; padding: 9px 15px; font-size: 14px; font-weight: 600; font-family: inherit;
-    transition: transform .08s; }
+    transition: transform .08s; min-height: 44px; }
+  .chipsep { flex-basis: 100%; font-size: 12px; color: var(--muted); margin: 4px 0 -2px 2px; }
   .chips button:active { background: var(--accent); color: #fff; transform: scale(.95); }
   .chips .ci { margin-right: 5px; }
   .chips .more { background: none; border-style: dashed; border-color: var(--fill2); color: var(--blue); }
@@ -124,7 +138,7 @@
   #sheet .inner { background: var(--sheet); border-radius: 20px 20px 0 0; width: 100%;
     padding: 18px 16px calc(24px + env(safe-area-inset-bottom)); }
   #toast { position: fixed; left: 50%; transform: translateX(-50%) translateY(8px); bottom: calc(100px + env(safe-area-inset-bottom));
-    background: var(--toast); border: .5px solid rgba(255,255,255,.08); color: #fff; border-radius: 100px; padding: 9px 18px;
+    background: var(--toast); border: .5px solid rgba(255,255,255,.16); box-shadow: 0 6px 20px rgba(0,0,0,.35); color: #fff; border-radius: 100px; padding: 9px 18px;
     font-size: 13px; font-weight: 600; z-index: 40; transition: opacity .3s, transform .3s; opacity: 0;
     pointer-events: none; width: max-content; max-width: 88vw; display: flex; align-items: center; gap: 14px; }
   #toast .toast-act { background: none; border: 0; color: #64b5ff; font: inherit; font-weight: 700;
@@ -140,7 +154,8 @@
   .seg { display: flex; background: var(--fill); border-radius: 10px; padding: 2px; margin-top: 16px; }
   .seg button { flex: 1; background: none; border: 0; border-radius: 8px; padding: 9px 0; min-height: 36px;
     color: var(--text); font: inherit; font-size: 14px; font-weight: 600; }
-  .seg button[aria-pressed="true"] { background: var(--group); box-shadow: 0 1px 4px rgba(0,0,0,.18); }
+  .seg button[aria-pressed="true"] { background: var(--seg-thumb); box-shadow: 0 1px 4px rgba(0,0,0,.18); }
+  .seg button { min-height: 40px; }
   #addAmount { font-size: 22px; font-weight: 700; font-family: ui-rounded, 'SF Pro Rounded', -apple-system, system-ui, sans-serif; }
   details.help { margin-top: 18px; font-size: 13px; color: var(--muted); }
   details.help summary { text-align: center; color: var(--blue); font-weight: 600; padding: 12px 0; list-style: none; }
@@ -176,8 +191,10 @@
   .hidden { display: none !important; }
   header { display: flex; justify-content: space-between; align-items: center; }
   .hdr-right { display: flex; align-items: center; gap: 10px; }
-  #tab-refresh { background: var(--fill); border: 0; border-radius: 100px; width: 30px; height: 30px; display: grid; place-items: center; color: var(--blue); padding: 0; }
-  #tab-refresh .ico { display: inline-flex; }
+  #tab-refresh { background: none; border: 0; width: 44px; height: 44px; margin: -7px -7px -7px 0; display: grid; place-items: center; color: var(--blue); padding: 0; }
+  #tab-refresh .ico { display: inline-flex; width: 32px; height: 32px; border-radius: 100px; background: var(--fill); align-items: center; justify-content: center; }
+  button.pill { border: 0; font-family: inherit; min-height: 30px; position: relative; }
+  button.pill::after { content: ''; position: absolute; inset: -7px -4px; } /* 44pt hit area */
   #tab-refresh svg { width: 17px; height: 17px; }
   /* Loading skeleton: shimmering placeholders while the backend builds the snapshot. */
   .skel { background: linear-gradient(90deg, var(--skel-a) 25%, var(--skel-b) 50%, var(--skel-a) 75%);
@@ -214,7 +231,7 @@
   <div id="app" class="hidden">
     <header>
       <div id="month" style="font-size:13px;font-weight:600;letter-spacing:.6px;color:var(--muted)"></div>
-      <div class="hdr-right"><span id="statusPill" class="pill good">all clear</span>
+      <div class="hdr-right"><button type="button" id="statusPill" class="pill good">all clear</button>
         <button id="tab-refresh" aria-label="Refresh"><span class="ico"><svg viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18.4 11a7.4 7.4 0 1 1-2.16-5.24"/><path d="M18.6 2.8v3.6h-3.6" stroke-linejoin="round"/></svg></span></button></div>
     </header>
     <div id="view-overview"></div>
@@ -235,9 +252,9 @@
       <div class="seg" role="group" aria-label="What are you logging">
         <button type="button" id="modeSpend" aria-pressed="true">Spend</button>
         <button type="button" id="modePaid" aria-pressed="false">Paid back</button></div>
-      <div class="card"><h3 id="addTitle">Log a spend</h3>
+      <div class="card" id="addCard"><h3 id="addTitle">Log a spend</h3>
         <div class="chips hidden" id="recentChips" role="group" aria-label="Repeat a recent quick-add" style="margin-top:0"></div>
-        <div style="display:flex;gap:10px;margin-top:12px">
+        <div id="amountRow" style="display:flex;gap:10px;margin-top:12px">
           <input type="text" inputmode="decimal" id="addAmount" aria-label="Amount" placeholder="0.00" style="flex:1" autocomplete="off">
           <select id="addCurrency" aria-label="Currency" style="width:96px">
             <option selected>MYR</option><option>SGD</option><option>USD</option><option>THB</option>
@@ -248,10 +265,14 @@
         <div style="margin-top:10px"><input type="text" id="addMerchant" aria-label="Merchant" placeholder="Merchant" autocomplete="off"></div>
         <div class="fieldlabel" id="catLabel">Category &mdash; optional, the rules decide</div>
         <div class="chips" id="addChips" role="group" aria-labelledby="catLabel"></div>
-        <div class="fieldlabel" id="frontLabel">Paid for someone? (optional)</div>
-        <div style="margin-top:14px"><input type="text" id="addFronted" aria-labelledby="frontLabel" placeholder="Their name" autocomplete="off"></div>
-        <div class="chips hidden" id="nameChips" role="group" aria-label="People who owe you" style="margin-top:10px"></div>
-        <div style="display:flex;gap:10px;margin-top:14px">
+        <div id="frontBlock">
+          <div class="fieldlabel" id="frontLabel">Paid for someone? (optional)</div>
+          <div style="margin-top:14px"><input type="text" id="addFronted" list="frontedNames" aria-labelledby="frontLabel" placeholder="Their name" autocomplete="off"></div>
+          <div class="chips hidden" id="nameChips" role="group" aria-label="People who owe you" style="margin-top:10px"></div>
+        </div>
+        <datalist id="frontedNames"></datalist>
+        <button type="button" class="linkbtn" id="extraToggle">Today &middot; change date or add a note</button>
+        <div id="addExtra" class="hidden" style="display:flex;gap:10px;margin-top:14px">
           <input type="date" id="addDate" aria-label="Date" style="flex:1">
           <input type="text" id="addNote" aria-label="Note" placeholder="Note (optional)" style="flex:1.3" autocomplete="off"></div>
         <button class="btn" id="addSave">Log spend</button>
@@ -275,6 +296,6 @@
   <div id="sheet" class="hidden"></div>
   <div id="toast" role="status" aria-live="polite"></div>
   <!-- bump ?v= on every app.js change: Safari/PWA caches are sticky -->
-  <script src="app.js?v=25"></script>
+  <script src="app.js?v=26"></script>
 </body>
 </html>
