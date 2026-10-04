@@ -7,7 +7,7 @@
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
-const APP_VERSION = 27; // keep in step with index.html's app.js?v=
+const APP_VERSION = 28; // keep in step with index.html's app.js?v=
 // The backend address is fixed and not secret (auth lives in the key), so connecting
 // only truly requires the key itself.
 const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
@@ -25,15 +25,16 @@ let tab = 'overview';
 const DEMO = {
   ok: true, month: 'August 2026', dayOfMonth: 18, daysInMonth: 31, totalMYR: 956.5,
   generatedAt: '2026-08-18 14:32',
-  byCat: { Food: 142.8, Groceries: 441.1, Transport: 42.6, Subscriptions: 54.9, Fuel: 80, Shopping: 129, Health: 59.1 },
-  budgets: { Food: 600, Groceries: 450, Transport: 200, Subscriptions: 60, Fuel: 250 },
+  byCat: { Food: 142.8, Groceries: 441.1, Transport: 42.6, Subscriptions: 54.9, Fuel: 80, Shopping: 129, Health: 59.1, 'Phone & Internet': 50 },
+  budgets: { Food: 600, Groceries: 450, Transport: 200, Subscriptions: 60, Fuel: 250, 'Phone & Internet': 50 },
+  fixedCats: ['Subscriptions', 'Phone & Internet', 'Family', 'Insurance'],
   categories: ['Food', 'Groceries', 'Transport', 'Fuel', 'Shopping', 'Health', 'Subscriptions'],
   coverage: { tng: '2026-08-14', hsbc: '2026-08-16', rhb: null, alipay: '2026-08-15' },
   efBalanceMYR: 2446.21,
   efMonthlyBasisMYR: 6980,
   buffer: { balanceMYR: 1810, floorMYR: 2500 },
   audit: { cashMYR: 11431.4, autologMYR: -900.2, unbilledMYR: 543.6, asOf: '2026-08-18 07:31' },
-  projByCat: { Food: 246, Groceries: 470, Transport: 73.4, Subscriptions: 54.9, Fuel: 80 },
+  projByCat: { Food: 246, Groceries: 470, Transport: 73.4, Subscriptions: 54.9, Fuel: 80, 'Phone & Internet': 50 },
   history: { '2026-07': { Food: 512.3, Groceries: 380, Transport: 96.5 }, '2026-06': { Food: 640.1, Groceries: 402.2, Transport: 88 } },
   monthRows: [
     { id: 'm1', date: '2026-08-18', merchant: 'Starbucks KLIA2', amountMYR: 19.5, category: 'Food', source: 'applepay', fronted: null },
@@ -450,6 +451,10 @@ function renderOverview() {
         } else if (typeof x.proj === 'number' && x.proj > x.s + 0.5 && x.cap > 0) {
           opts.pacePct = Math.min(100, Math.round(x.proj / x.cap * 100));
         }
+        // A bill envelope (backend fixedCats) is never paced; once its charge has
+        // landed, say so instead of leaving a bare "RM0.00 left".
+        const fixed = (data.fixedCats || []).includes(x.c);
+        if (fixed && !over && opts.pacePct === undefined && x.s >= x.cap - 0.5 && x.s > 0) opts.paceText = 'paid for the month';
         const right = over ? `${fmt(x.s - x.cap)} over` : `${fmt(x.cap - x.s)} left`;
         // One neutral tint while on track (29 Sep 2026, user choice): category
         // colours stay on the icon tiles, so amber and red on a bar only ever
