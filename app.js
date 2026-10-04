@@ -7,7 +7,7 @@
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
-const APP_VERSION = 26; // keep in step with index.html's app.js?v=
+const APP_VERSION = 27; // keep in step with index.html's app.js?v=
 // The backend address is fixed and not secret (auth lives in the key), so connecting
 // only truly requires the key itself.
 const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
@@ -88,6 +88,19 @@ function friendly(err) {
   return m;
 }
 const reduceMotion = () => !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+
+// Add style (critique 4 Oct 2026, user's choice to try): quick-add opens as a
+// sheet over the current tab — the keypad is up at once and Overview stays behind,
+// so the budget bar visibly moves when the sheet closes. "Tab" keeps the old screen.
+const ADD_STYLE_KEY = 'autolog.addStyle';
+function addAsSheet() { try { return (localStorage.getItem(ADD_STYLE_KEY) || 'sheet') === 'sheet'; } catch (e) { return true; } }
+function setAddStyle(v) { try { localStorage.setItem(ADD_STYLE_KEY, v); } catch (e) { /* per-device nicety */ } }
+// 'yyyy-MM-dd HH:mm' -> 'today 14:32' / '18 Aug 14:32' (the footer showed raw ISO).
+function fmtUpdated(s) {
+  const m = String(s || '').match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/);
+  if (!m) return s || '';
+  return (m[1] === localToday() ? 'today' : fmtDay(m[1])) + ' ' + m[2];
+}
 
 const barColor = (r) => r >= 1 ? 'var(--red)' : r >= 0.8 ? 'var(--amber)' : 'var(--green)';
 // Pace colour (27 Sep 2026): judge where the month LANDS, not how much of the cap
@@ -265,13 +278,13 @@ function catChipsHtml(cats, top, selected) {
 }
 function wireMore(holder) {
   const more = holder.querySelector('.more');
-  if (more) more.addEventListener('click', () => {
+  if (more) more.addEventListener('click', (e) => {
     more.classList.add('hidden');
     more.setAttribute('aria-expanded', 'true');
     const rest = holder.querySelector('.chips-more');
     rest.classList.remove('hidden');
     const firstRest = rest.querySelector('button');
-    if (firstRest) firstRest.focus({ preventScroll: true });
+    if (firstRest && e.detail === 0) firstRest.focus({ preventScroll: true }); // keyboard only
   });
 }
 // Likeliest categories: explicit suggestions, then this month's most-used, then
@@ -328,14 +341,14 @@ function barRow(name, right, pct, color, opts) {
   return `<div class="barrow${opts.cat ? ' tappable' : ''}"${opts.cat ? ` data-cat="${esc(opts.cat)}" role="button" tabindex="0" aria-label="${esc(label)}"` : ''}>
     ${catIcon(name)}<div class="mid">
     <div class="top"><span class="name">${esc(name)}</span><span class="amt" style="${opts.amtColor ? 'color:' + opts.amtColor : ''}">${right}</span></div>
-    <div class="track" aria-hidden="true"><div class="fill" style="width:2%;background:${color}" data-w="${pct}"></div>
+    <div class="track" aria-hidden="true"><div class="fill" style="width:${pct}%;background:${color}" data-w="${pct}"></div>
     ${opts.pacePct !== undefined ? `<div class="pace" style="left:calc(${opts.pacePct}% - 1px)"></div>` : ''}</div>
-    ${opts.paceText ? `<div class="pacetext" style="color:${opts.paceColor || 'var(--muted)'}">${opts.paceText}</div>` : ''}</div></div>`;
+    ${opts.paceText ? `<div class="pacetext" style="color:${opts.paceColor || 'var(--muted)'}">${opts.paceText}</div>` : ''}</div>${opts.cat ? '<span class="chev" aria-hidden="true">&rsaquo;</span>' : ''}</div>`;
 }
 
 function animateFills(rootId) {
   requestAnimationFrame(() => requestAnimationFrame(() => {
-    document.querySelectorAll('#' + rootId + ' .fill[data-w]').forEach((f) => { f.style.width = f.dataset.w + '%'; });
+    document.querySelectorAll('#' + rootId + ' .fill[data-w]').forEach((f) => { f.style.transform = 'scaleX(1)'; });
     document.querySelectorAll('#' + rootId + ' circle[data-dash]').forEach((c) => {
       c.setAttribute('stroke-dasharray', c.dataset.dash + ' 100');
     });
@@ -412,7 +425,7 @@ function renderOverview() {
   if (todos.length) {
     html += `<div class="card notice"><h3>To do in Actual</h3>` + todos.map((x, i) => `<div class="txn" style="gap:10px">
       <div style="min-width:0;flex:1"><div class="m">Delete &ldquo;${esc(x.merchant)}&rdquo;</div>
-      <div class="sub">${esc(x.date || '')} &middot; ${x.amountMYR === null ? 'no amount' : fmt(x.amountMYR)} &middot; removed here as not real</div></div>
+      <div class="sub">${esc(fmtDay(x.date))} &middot; ${x.amountMYR === null ? 'no amount' : fmt(x.amountMYR)} &middot; removed here as not real</div></div>
       <div class="rowacts"><button type="button" data-todo="${i}">Done</button></div></div>`).join('') + `</div>`;
   }
 
@@ -450,7 +463,8 @@ function renderOverview() {
     .map((c) => ({ c, s: byCat[c] })).sort((a, b) => b.s - a.s);
   if (others.length) {
     const max = Math.max(others[0].s, 0.01);
-    html += `<div class="card list"><h3>${bCats.length ? 'Other spending' : 'Spending'}</h3>` +
+    // These bars are relative to the biggest row (no cap to measure against) — say so.
+    html += `<div class="card list"><h3><span>${bCats.length ? 'Other spending' : 'Spending'}</span><span style="font-size:12px">bars relative to the largest</span></h3>` +
       others.map((x) => barRow(x.c, fmt(x.s), Math.max(2, Math.round(x.s / max * 100)), 'var(--bar)', { cat: x.c })).join('') +
       '</div>';
   }
@@ -468,7 +482,7 @@ function renderOverview() {
 
   html += `<div class="card list"><h3>Recent</h3>` +
     (data.recent || []).map((t, i) => txnRow(t, 'data-ri="' + i + '"')).join('') +
-    `</div><div class="muted" style="text-align:center;margin-top:20px;font-size:12px">Updated ${esc(data.generatedAt || '')}</div>`;
+    `</div><div class="muted" style="text-align:center;margin-top:20px;font-size:12px">Updated ${esc(fmtUpdated(data.generatedAt))}</div>`;
   const view = $('view-overview');
   view.classList.toggle('firstpaint', firstPaint); // card entrance stagger, first load only
   view.innerHTML = html;
@@ -565,7 +579,7 @@ function txnRow(t, attr) {
   const inflow = t.amountMYR !== null && t.amountMYR < 0;
   return `<div class="txn tappable" role="button" tabindex="0" ${attr}>${catIcon(t.category)}<div style="min-width:0;flex:1"><div class="m">${esc(t.merchant || '(no merchant)')}</div>
     <div class="sub">${esc(fmtDay(t.date))} &middot; ${esc(t.category)}${t.fronted ? ` &middot; <span style="color:var(--yellow)">fronted: ${esc(t.fronted)}</span>` : ''}</div></div>
-    <div class="val${inflow ? ' in' : ''}">${t.amountMYR === null ? '—' : (inflow ? '+' + fmt(-t.amountMYR) : fmt(t.amountMYR))}</div></div>`;
+    <div class="val${inflow ? ' in' : ''}">${t.amountMYR === null ? '—' : (inflow ? '+' + fmt(-t.amountMYR) : fmt(t.amountMYR))}</div><span class="chev" aria-hidden="true">&rsaquo;</span></div>`;
 }
 
 // Every bottom sheet is a modal dialog: labelled by its #sheetTitle, focus moves
@@ -715,7 +729,7 @@ async function notReal(t, after) {
 function fixAmountSheet(t, after) {
   const flag = amountFlag(t);
   const sheet = mountSheet(`<div id="sheetTitle" style="font-size:17px;font-weight:700">Fix amount</div>
-    <div class="muted" style="font-size:13px;margin-top:2px">${esc(t.merchant)} &middot; ${esc(t.date || '')} &middot; read as ${fmt(t.amountMYR)}</div>
+    <div class="muted" style="font-size:13px;margin-top:2px">${esc(t.merchant)} &middot; ${esc(fmtDay(t.date))} &middot; read as ${fmt(t.amountMYR)}</div>
     ${flag ? `<div class="flag">${flag}</div>` : ''}
     <div class="fieldlabel" id="fixLabel">Correct amount (RM)</div>
     <div style="margin-top:14px"><input type="text" inputmode="decimal" id="fixAmount" aria-labelledby="fixLabel" value="${Math.abs(t.amountMYR)}" autocomplete="off" style="background:var(--fill);font-size:20px;font-weight:700"></div>
@@ -772,12 +786,13 @@ function openRowSheet(t, back) {
   // Your own quick-adds are editable (merchant/amount/date) after the undo
   // window; card/TnG rows are statement-matched and stay as captured.
   const editable = t.source === 'manual';
-  const editBlock = editable ? `<div class="muted" style="font-size:12px;margin-top:14px;letter-spacing:.6px;text-transform:uppercase">Edit this quick-add</div>
-    <div style="margin-top:8px"><input type="text" id="editMerchant" aria-label="Merchant" value="${esc(t.merchant || '')}" placeholder="Merchant" autocomplete="off" style="background:var(--fill)"></div>
+  const editBlock = editable ? `<button type="button" class="linkbtn" id="editToggle" aria-expanded="false" aria-controls="editBlock">Edit this quick-add &rsaquo;</button>
+    <div id="editBlock" class="hidden">
+    <div style="margin-top:4px"><input type="text" id="editMerchant" aria-label="Merchant" value="${esc(t.merchant || '')}" placeholder="Merchant" autocomplete="off" style="background:var(--fill)"></div>
     <div style="display:flex;gap:10px;margin-top:8px">
       <input type="text" inputmode="decimal" id="editAmount" aria-label="Amount (RM)" value="${t.amountMYR === null ? '' : Math.abs(t.amountMYR)}" placeholder="Amount (RM)" style="flex:1;background:var(--fill)" autocomplete="off">
       <input type="date" id="editDate" aria-label="Date" max="${localToday()}" value="${esc(t.date)}" style="flex:1;background:var(--fill)"></div>
-    <button class="btn" id="editSave">Save changes</button>` : '';
+    <button class="btn secondary" id="editSave">Save changes</button></div>` : '';
   const flag = freshImport(t) ? amountFlag(t) : null;
   const removeBlock = freshImport(t)
     ? `<div class="muted" style="font-size:12px;margin-top:14px">Imported from a screenshot ${Math.round((Date.now() - t.createdMs) / 3600e3)}h ago.</div>
@@ -787,17 +802,29 @@ function openRowSheet(t, back) {
   const sheet = mountSheet(`<div id="sheetTitle" style="font-size:17px;font-weight:700">${esc(t.merchant || '(no merchant)')}</div>
     <div class="muted" style="font-size:13px;margin-top:2px">${esc(fmtDay(t.date))} &middot; ${t.amountMYR === null ? 'no amount' : fmt(t.amountMYR)} &middot; ${esc(srcLabel(t.source))}</div>
     <div class="fieldlabel" id="rowCatLabel">Category${NOT_PICKABLE[t.category] ? ' &mdash; not set yet' : ''}</div>
-    <div class="chips" id="rowCats" role="group" aria-labelledby="rowCatLabel">${catChipsHtml(pickableCats(true),
-      topCats([...(NOT_PICKABLE[t.category] ? [] : [t.category]), ...(suggestCategory(t) ? [suggestCategory(t)] : [])]), t.category)}</div>${editBlock}${removeBlock}
-    <div class="muted" style="font-size:13px;margin-top:14px">${t.amountMYR !== null && t.amountMYR < 0
-      ? 'Repayment: tag it with the same name as the spend it pays back.'
-      : 'Paid this for someone? Tag them — the Owed-to-you card tracks it until they pay you back.'}</div>
-    <div style="margin-top:10px"><input type="text" id="frontedName" list="frontedNames" aria-label="Fronted for (name)" placeholder="Fronted for (name)" value="${esc(t.fronted || '')}" autocomplete="off" style="background:var(--fill)"></div>
-    <div style="display:flex;gap:10px"><button class="btn" id="frontedSave">Save tag</button>
-    ${t.fronted ? '<button class="btn quiet" id="frontedClear">Remove tag</button>' : ''}</div>`, back ? 'Back' : 'Close');
+    <div class="chips cats" id="rowCats" role="group" aria-labelledby="rowCatLabel">${catChipsHtml(pickableCats(true),
+      topCats([...(NOT_PICKABLE[t.category] ? [] : [t.category]), ...(suggestCategory(t) ? [suggestCategory(t)] : [])]), t.category)}</div>${removeBlock}${editBlock}
+    <button type="button" class="linkbtn" id="frontToggle" aria-expanded="${t.fronted ? 'true' : 'false'}" aria-controls="frontRow">${t.fronted ? 'Fronted for ' + esc(t.fronted) : (t.amountMYR !== null && t.amountMYR < 0 ? 'Repayment from someone?' : 'Paid this for someone?')} &rsaquo;</button>
+    <div id="frontRow" class="${t.fronted ? '' : 'hidden'}">
+    <div class="muted" style="font-size:13px;margin-top:2px">${t.amountMYR !== null && t.amountMYR < 0
+      ? 'Tag the repayment with the same name as the spend it pays back.'
+      : 'Tag them — the Owed-to-you card tracks it until they pay you back.'}</div>
+    <div style="margin-top:10px"><input type="text" id="frontedName" list="frontedNames" aria-label="Fronted for (name)" placeholder="Their name" value="${esc(t.fronted || '')}" autocomplete="off" style="background:var(--fill)"></div>
+    <div style="display:flex;gap:10px"><button class="btn secondary" id="frontedSave">Save tag</button>
+    ${t.fronted ? '<button class="btn quiet" id="frontedClear">Remove tag</button>' : ''}</div></div>`, back ? 'Back' : 'Close');
   if (back) sheetOnClose = back;
   const rowCats = sheet.querySelector('#rowCats');
   wireMore(rowCats);
+  // Disclosures: the sheet opens on the category chips; the rest unfolds on request.
+  [['frontToggle', 'frontRow', 'frontedName'], ['editToggle', 'editBlock', 'editMerchant']].forEach(([tg, blk, focusId]) => {
+    const btn = sheet.querySelector('#' + tg);
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      const open = sheet.querySelector('#' + blk).classList.toggle('hidden');
+      btn.setAttribute('aria-expanded', String(!open));
+      if (!open) sheet.querySelector('#' + focusId).focus({ preventScroll: true });
+    });
+  });
   rowCats.querySelectorAll('button[data-c]').forEach((b) => b.addEventListener('click', () => {
     if (b.dataset.c === t.category) return toast('Already ' + t.category);
     sheetOnClose = null;
@@ -917,7 +944,7 @@ function renderMore() {
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:12px">
         <div style="font-size:24px;font-weight:800;letter-spacing:-.5px">${fmt(data.efBalanceMYR)}</div>
         ${months !== null ? `<div class="muted" style="font-size:13px;font-weight:600">&asymp; ${months.toFixed(1)} mo of core outflow</div>` : ''}</div>
-      ${months !== null ? `<div class="track" style="margin-top:10px" role="progressbar" aria-label="Emergency Fund toward a 3-month cushion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(goalPct)}"><div class="fill" style="width:2%;background:var(--blue)" data-w="${Math.max(2, goalPct)}"></div></div>
+      ${months !== null ? `<div class="track" style="margin-top:10px" role="progressbar" aria-label="Emergency Fund toward a 3-month cushion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(goalPct)}"><div class="fill" style="width:${Math.max(2, goalPct)}%;background:var(--blue)" data-w="1"></div></div>
       <div class="muted" style="font-size:12px;margin-top:7px">toward a 3-month cushion (${fmt(basis * 3)}) &middot; the envelope only &mdash; off-budget savings not counted</div>` : ''}</div>`;
   }
 
@@ -931,7 +958,7 @@ function renderMore() {
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:12px">
         <div style="font-size:24px;font-weight:800;letter-spacing:-.5px">${fmt(b.balanceMYR)}</div>
         <div class="muted" style="font-size:13px;font-weight:600">floor ${fmt(b.floorMYR)}</div></div>
-      <div class="track" style="margin-top:10px" role="progressbar" aria-label="Buffer against its floor" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><div class="fill" style="width:2%;background:${ok ? 'var(--green)' : 'var(--amber)'}" data-w="${pct}"></div></div>
+      <div class="track" style="margin-top:10px" role="progressbar" aria-label="Buffer against its floor" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><div class="fill" style="width:${pct}%;background:${ok ? 'var(--green)' : 'var(--amber)'}" data-w="1"></div></div>
       <div style="font-size:12px;margin-top:7px;color:${ok ? 'var(--muted)' : 'var(--amber)'}">${ok
         ? `${fmt(b.balanceMYR - b.floorMYR)} above the floor &middot; covers one-off shocks`
         : `${fmt(b.floorMYR - b.balanceMYR)} below the floor &mdash; salary above plan refills it first`}</div></div>`;
@@ -954,7 +981,17 @@ function renderMore() {
       <div id="auditOut"></div></div>`;
   }
 
-  html += `<div class="muted" style="text-align:center;margin-top:20px;font-size:12px">Updated ${esc(data.generatedAt || '')}</div>`;
+  html += `<div class="card"><h3>Quick add opens as</h3>
+    <div class="seg" style="margin-top:12px" role="group" aria-label="Quick add style">
+      <button type="button" id="styleSheet" aria-pressed="${addAsSheet()}">Sheet over the screen</button>
+      <button type="button" id="styleTab" aria-pressed="${!addAsSheet()}">Its own tab</button></div>
+    <div class="muted" style="font-size:12px;margin-top:8px">Sheet: the keypad comes up at once and the screen behind stays put. Switch back here any time.</div></div>`;
+  html += `<div class="card"><h3>How the numbers work</h3><ul class="muted" style="font-size:13px;line-height:1.55;margin:4px 0 0;padding-left:18px">
+    <li><b style="color:var(--text)">Safe to spend</b> &mdash; what&rsquo;s left across every budgeted envelope, divided by the days left this month (today included). An overspent envelope counts against the others.</li>
+    <li><b style="color:var(--text)">Pace tick</b> &mdash; the small mark on a bar is where this month is heading; &ldquo;heading RM20 over&rdquo; means that projection passes the cap.</li>
+    <li><b style="color:var(--text)">The rules</b> &mdash; keyword rules in the sheet&rsquo;s Rules tab pick a category from the merchant name; anything they miss waits in Review.</li>
+    <li><b style="color:var(--text)">Buffer floor</b> &mdash; the cushion for one-off shocks (the worst single month seen); salary above plan refills it before anything else.</li></ul></div>`;
+  html += `<div class="muted" style="text-align:center;margin-top:20px;font-size:12px">Updated ${esc(fmtUpdated(data.generatedAt))}</div>`;
   // Only the data cards re-render; the static import card above keeps its
   // chosen files and the last import's review list across refreshes.
   const view = $('more-dyn');
@@ -963,6 +1000,12 @@ function renderMore() {
   animateFills('more-dyn');
   const auditBtn = $('auditBtn');
   if (auditBtn) auditBtn.addEventListener('click', runAudit);
+  [['styleSheet', 'sheet'], ['styleTab', 'tab']].forEach(([id, v]) => $(id).addEventListener('click', () => {
+    setAddStyle(v);
+    $('styleSheet').setAttribute('aria-pressed', String(v === 'sheet'));
+    $('styleTab').setAttribute('aria-pressed', String(v === 'tab'));
+    toast(v === 'sheet' ? 'Quick add now opens as a sheet' : 'Quick add now has its own tab');
+  }));
   const searchBox = $('searchBox');
   if (searchBox) {
     searchBox.value = q;
@@ -997,7 +1040,7 @@ function renderReview() {
         ${reviewSelectMode ? `<span class="selbox" aria-hidden="true"><span class="selmark${reviewSel.has(t.id) ? ' on' : ''}"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.4l2.6 2.6L11 4.4"/></svg></span></span>` : catIcon(suggestCategory(t) || t.category)}
         <div style="min-width:0;flex:1">
         <div class="m">${esc(t.merchant || '(no merchant)')}</div>
-        <div class="sub">${esc(fmtDay(t.date))} &middot; ${esc(srcLabel(t.source))}${t.category === 'REVIEW' ? ' &middot; REVIEW' : ''}${(() => { const g = suggestCategory(t); return g ? ` &middot; maybe ${esc(g)}` : ''; })()}</div></div>
+        <div class="sub">${esc(fmtDay(t.date))} &middot; ${esc(srcLabel(t.source))}${t.category === 'REVIEW' ? ' &middot; REVIEW' : ''}${(() => { const g = suggestCategory(t); return g ? ` &middot; <span style="color:var(--text);font-weight:600">maybe ${esc(g)}</span>` : ''; })()}</div></div>
         <div class="val">${t.amountMYR === null ? '—' : fmt(t.amountMYR)}</div></div>`).join('') +
       '</div>' +
       (reviewSelectMode && reviewSel.size
@@ -1044,11 +1087,11 @@ function openSheet(txns) {
     : esc(txns[0].merchant || '(no merchant)');
   const sub = many
     ? 'one category for all of them'
-    : `${esc(txns[0].date)} &middot; ${txns[0].amountMYR === null ? 'no amount' : fmt(txns[0].amountMYR)} &middot; ${esc(txns[0].source)}`;
+    : `${esc(fmtDay(txns[0].date))} &middot; ${txns[0].amountMYR === null ? 'no amount' : fmt(txns[0].amountMYR)} &middot; ${esc(srcLabel(txns[0].source))}`;
   const sheet = mountSheet(`<div id="sheetTitle" style="font-size:17px;font-weight:700">${head}</div>
     <div class="muted" style="font-size:13px;margin-top:2px">${sub}</div>
     ${suggested ? `<div class="muted" style="font-size:12px;margin-top:10px">Suggested &mdash; this merchant is ${esc(suggested)} elsewhere</div>` : ''}
-    <div class="chips" id="catPick" role="group" aria-label="Category">${catChipsHtml(cats, topCats(suggested ? [suggested] : []), null)}</div>
+    <div class="chips cats" id="catPick" role="group" aria-label="Category">${catChipsHtml(cats, topCats(suggested ? [suggested] : []), null)}</div>
     <div class="muted" style="font-size:12px;margin-top:10px">New envelopes appear here once they&rsquo;re funded in Actual.</div>`, 'Cancel');
   const holder = sheet.querySelector('#catPick');
   wireMore(holder);
@@ -1192,21 +1235,58 @@ function setAddMode(mode) {
   else $('addCard').insertBefore(block, $('extraToggle'));
   fillNameChips();
   fillRecentChips();
+  syncAddDisclosure();
 }
 
-// Date + note are rarely needed: one quiet line until asked for (or in use).
-function showAddExtra(open) {
+// The rarely-used fields (who you paid for, date, note) sit behind ONE quiet line
+// in Spend mode, so the first screen is amount, merchant, category, Log. Paid back
+// needs "who" up top, so only date/note fold there. Anything in use stays shown.
+let addMoreOpen = false;
+function syncAddDisclosure() {
+  const who = $('addFronted').value.trim();
+  const extraInUse = ($('addDate').value && $('addDate').value !== localToday()) || $('addNote').value.trim();
+  const open = addMoreOpen || !!extraInUse;
   $('addExtra').classList.toggle('hidden', !open);
+  $('frontBlock').classList.toggle('hidden', !(addPaid() || open || who));
   $('extraToggle').classList.toggle('hidden', open);
+  $('extraToggle').setAttribute('aria-expanded', String(open));
+  $('extraToggle').textContent = addPaid() ? 'More options · date or note' : 'More options · date, note, paid for someone';
 }
+function showAddExtra(open) {
+  addMoreOpen = open;
+  syncAddDisclosure();
+}
+
+// Sheet style: the form's nodes move from #view-add into the sheet (their
+// listeners travel with them) and move back when it closes.
+function openAddSheet() {
+  if (!$('sheet').classList.contains('hidden')) return;
+  mountSheet('<div id="addHost"></div>', 'Close');
+  const host = $('addHost');
+  host.appendChild($('addForm'));
+  host.appendChild($('addHelp'));
+  $('sheet').querySelector('.inner').setAttribute('aria-labelledby', 'addTitle');
+  sheetOnClose = () => {
+    $('view-add').appendChild($('addForm'));
+    $('view-add').appendChild($('addHelp'));
+    // A repayment started from Owed and then abandoned must not leave the next
+    // tired taxi logging as a repayment.
+    if (addPaid() && !$('addAmount').value && !$('addMerchant').value) setAddMode('spend');
+    healViewport();
+    if (sheetReturnFocus && document.contains(sheetReturnFocus)) sheetReturnFocus.focus({ preventScroll: true });
+    sheetReturnFocus = null;
+  };
+  $('addAmount').focus({ preventScroll: true }); // the keypad is up on arrival
+}
+function closeAddSheet() { if (!$('sheet').classList.contains('hidden')) closeSheet(); }
 
 // From the Owed card: straight into Paid back with the person picked.
 function startRepayment(f) {
-  setTab('add');
+  if (addAsSheet()) openAddSheet();
+  else { setTab('add'); window.scrollTo(0, 0); }
   setAddMode('paid');
   const chip = [...$('nameChips').querySelectorAll('button')].find((b) => b.dataset.name === f.name);
   if (chip) chip.click();
-  window.scrollTo(0, 0);
 }
 
 function selectedAddCat() { return $('addChips').querySelector('.sel')?.dataset.c; }
@@ -1496,10 +1576,29 @@ async function saveQuickAdd() {
     const r = await quickAdd(fields);
     if (!r.ok) throw new Error(r.error || 'rejected');
     const amtText = fields.currency === 'MYR' ? fmt(value) : fields.currency + ' ' + amount;
-    toast(paidback
-      ? `Paid back ${amtText} into ${cat}${r.dedup ? ' (already logged)' : ''}`
-      : `Logged ${amtText} at ${merchant}${r.dedup ? ' (already logged)' : ''}`);
-    if (r.id && !r.dedup && !isDemo()) rememberLastAdd(r.id, `${paidback ? '+' : ''}${amtText} · ${merchant}`);
+    // The toast answers the question that prompted the log ("is Transport still
+    // OK?") from the numbers already on screen, and carries Undo inline; the
+    // Overview pill stays as the 15-minute fallback.
+    let msg;
+    if (paidback) msg = `Paid back ${amtText} into ${cat}`;
+    else if (cat && (data && data.budgets || {})[cat] > 0 && fields.currency === 'MYR') {
+      const leftNow = data.budgets[cat] - ((data.byCat || {})[cat] || 0) - value;
+      msg = `Logged ${amtText} · ${cat} ${leftNow >= 0 ? fmt(leftNow) + ' left' : fmt(-leftNow) + ' over'}`;
+    } else if (cat) msg = `Logged ${amtText} · ${cat}`;
+    else msg = `Logged ${amtText} at ${merchant} · category by the rules`;
+    if (r.dedup) msg += ' (already logged)';
+    const undoable = !!r.id && !r.dedup;
+    if (addAsSheet()) closeAddSheet(); // first, so the toast sits at the bottom by the thumb
+    toast(msg, undoable ? { label: 'Undo', run: async () => {
+      try {
+        const u = await undoQuickAdd(r.id);
+        if (!u.ok) throw new Error(u.error || 'rejected');
+        clearLastAdd();
+        toast(`Removed — ${amtText} · ${merchant}`);
+      } catch (err) { toast('Undo failed: ' + friendly(err)); }
+      refresh();
+    } } : null);
+    if (undoable && !isDemo()) rememberLastAdd(r.id, `${paidback ? '+' : ''}${amtText} · ${merchant}`);
     $('addMerchant').value = '';
     $('addAmount').value = '';
     $('addNote').value = '';
@@ -1509,7 +1608,7 @@ async function saveQuickAdd() {
     $('addDate').value = localToday();
     showAddExtra(false);
     setAddMode('spend');
-    setTab('overview');
+    if (!addAsSheet()) setTab('overview');
     refresh();
   } catch (err) {
     toast('Failed: ' + friendly(err));
@@ -1558,6 +1657,7 @@ async function refresh() {
     fillAddChips();
     fillRecentChips();
     fillNameChips();
+    syncAddDisclosure();
     updateBadge();
   } catch (err) {
     if (seq !== refreshSeq) return;
@@ -1608,15 +1708,16 @@ function boot() {
   $('nav').classList.remove('hidden');
   $('tab-overview').addEventListener('click', () => setTab('overview'));
   $('tab-review').addEventListener('click', () => setTab('review'));
-  $('tab-add').addEventListener('click', () => setTab('add'));
+  $('tab-add').addEventListener('click', () => (addAsSheet() ? openAddSheet() : setTab('add')));
   $('tab-more').addEventListener('click', () => setTab('more'));
   $('tab-refresh').addEventListener('click', () => { toast('Refreshing…'); refresh(); });
   $('addDate').value = localToday();
   $('addDate').max = localToday(); // a spend can't be in the future
-  $('extraToggle').addEventListener('click', () => { showAddExtra(true); $('addDate').focus(); });
+  $('extraToggle').addEventListener('click', () => showAddExtra(true));
   $('addFronted').addEventListener('input', fillNameChips);
   $('statusPill').addEventListener('click', () => setTab('review'));
-  $('addSave').addEventListener('click', saveQuickAdd);
+  $('addForm').addEventListener('submit', (e) => { e.preventDefault(); saveQuickAdd(); }); // Go/Enter on the keypad logs it
+  syncAddDisclosure(); // the rare fields start folded
   $('modeSpend').addEventListener('click', () => setAddMode('spend'));
   $('modePaid').addEventListener('click', () => setAddMode('paid'));
   fillAddChips();

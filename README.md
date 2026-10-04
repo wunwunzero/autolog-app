@@ -10,9 +10,13 @@ home screen for the full-screen app.
 
 - **Overview** — month-to-date total, budget ring + green/amber/red envelope bars,
   other spending, recent transactions.
-- **Add** — log a manual transaction (cash, or anything no automation sees): merchant,
-  amount, currency (non-MYR converts via the day's rate), optional category and date.
-  Goes through the backend's full webhook pipeline — dedup, rules, alerts, budgets.
+- **Add** — log a manual transaction (cash, or anything no automation sees). Opens as a
+  **sheet over the current screen** with the amount keypad already up (v27; switch to
+  "its own tab" under More if you prefer): amount, merchant, category chips, and one
+  "More options" line for date, note, currency and "paid for someone". Go/Enter submits.
+  The toast says what it did to the envelope ("Logged RM12.00 · Transport RM145.40
+  left") with Undo inline. Everything goes through the backend's full webhook
+  pipeline — dedup, rules, alerts, budgets.
 - **Review** — tap-categorize Uncategorized/REVIEW rows (chips + "New…"). Rows stay
   out of Actual Budget until categorised, so clearing this queue is the sync gate.
 - **Refresh** — refetch; also happens automatically when the app regains focus.

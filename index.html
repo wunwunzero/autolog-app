@@ -82,17 +82,17 @@
   .pacetext { font-size: 11px; margin-top: 4px; font-variant-numeric: tabular-nums; }
   .barrow.tappable:active { opacity: .6; }
   #sheet .inner.scroll { max-height: 82vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-  .fill { height: 4px; border-radius: 2px; transition: width .5s cubic-bezier(.22,.9,.34,1); }
+  .fill { height: 4px; border-radius: 2px; transform-origin: left center; transform: scaleX(0); transition: transform .5s cubic-bezier(.22,.9,.34,1); }
   .txn { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-top: .5px solid var(--hair); }
   .txn:first-of-type { border-top: 0; padding-top: 14px; }
   .card:not(.list) .txn:first-of-type { padding-top: 2px; }
-  .txn .chev { color: var(--muted); font-size: 22px; line-height: 1; margin-left: -4px; }
+  .chev { color: var(--muted); font-size: 22px; line-height: 1; margin-left: -4px; flex: 0 0 auto; }
   .txn.imported .m { white-space: normal; overflow-wrap: anywhere; }
   .issues { margin: 4px 0 6px; padding-left: 18px; color: var(--text); font-size: 12px; line-height: 1.5; }
   details.issues { padding-left: 0; }
   details.issues summary { font-weight: 600; padding: 8px 0; }
   details.issues ul { padding-left: 18px; margin: 0 0 4px; }
-  .linkbtn { background: none; border: 0; color: var(--blue); font: inherit; font-size: 14px; font-weight: 600; padding: 12px 2px; margin-top: 4px; }
+  .linkbtn { background: none; border: 0; color: var(--blue); font: inherit; font-size: 14px; font-weight: 600; padding: 12px 2px; margin-top: 4px; min-height: 44px; display: block; text-align: left; }
   .txn .m { font-size: 15px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .txn .sub { font-size: 12px; color: var(--muted); margin-top: 1px; }
   .txn .val { font-size: 15px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -109,7 +109,7 @@
   /* Heading-row text button: padding widens the hit area to ~44pt without
      moving the text (negative margins cancel it out). */
   .cardhead-btn { background: none; border: 0; color: var(--blue); font-family: inherit; font-size: 15px;
-    font-weight: 600; text-transform: none; letter-spacing: 0; padding: 14px 4px 12px 18px; margin: -14px -4px -12px 0; }
+    font-weight: 600; text-transform: none; letter-spacing: 0; padding: 14px 4px 12px 18px; margin: -14px -4px -12px 0; min-height: 44px; }
   /* Floating pill tab bar */
   nav { position: fixed; left: 16px; right: 16px; bottom: calc(12px + env(safe-area-inset-bottom)); display: flex;
     background: var(--nav); -webkit-backdrop-filter: blur(20px) saturate(1.6); backdrop-filter: blur(20px) saturate(1.6);
@@ -124,7 +124,7 @@
   nav .ico { position: relative; display: inline-flex; height: 22px; }
   nav .ico svg { width: 22px; height: 22px; }
   nav .badge { position: absolute; top: -5px; right: -12px; background: var(--badge); color: #fff;
-    border-radius: 100px; font-size: 10px; font-weight: 700; padding: 1px 5px; }
+    border-radius: 100px; font-size: 11px; font-weight: 700; padding: 1px 5px; }
   .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
   .chips button { background: var(--fill); border: .5px solid var(--chip-line); color: var(--text);
     border-radius: 100px; padding: 9px 15px; font-size: 14px; font-weight: 600; font-family: inherit;
@@ -142,7 +142,7 @@
     font-size: 13px; font-weight: 600; z-index: 40; transition: opacity .3s, transform .3s; opacity: 0;
     pointer-events: none; width: max-content; max-width: 88vw; display: flex; align-items: center; gap: 14px; }
   #toast .toast-act { background: none; border: 0; color: #64b5ff; font: inherit; font-weight: 700;
-    padding: 12px 6px; margin: -12px -8px -12px 0; white-space: nowrap; }
+    padding: 12px 6px; margin: -12px -8px -12px 0; white-space: nowrap; min-height: 44px; }
   ::placeholder { color: var(--placeholder); opacity: 1; }
   /* Keyboard / switch-control focus (never shown for taps). */
   :focus-visible { outline: 2.5px solid var(--blue); outline-offset: 2px; border-radius: 10px; }
@@ -155,7 +155,7 @@
   .seg button { flex: 1; background: none; border: 0; border-radius: 8px; padding: 9px 0; min-height: 36px;
     color: var(--text); font: inherit; font-size: 14px; font-weight: 600; }
   .seg button[aria-pressed="true"] { background: var(--seg-thumb); box-shadow: 0 1px 4px rgba(0,0,0,.18); }
-  .seg button { min-height: 40px; }
+  .seg button { min-height: 44px; }
   #addAmount { font-size: 22px; font-weight: 700; font-family: ui-rounded, 'SF Pro Rounded', -apple-system, system-ui, sans-serif; }
   details.help { margin-top: 18px; font-size: 13px; color: var(--muted); }
   details.help summary { text-align: center; color: var(--blue); font-weight: 600; padding: 12px 0; list-style: none; }
@@ -163,7 +163,7 @@
   details.help ul { margin: 4px 0 0; padding-left: 18px; line-height: 1.55; }
   /* Import review: flagged rows + row actions. */
   .flag { display: inline-block; font-size: 12px; font-weight: 600; color: var(--amber);
-    background: color-mix(in srgb, var(--amber) 14%, transparent); border-radius: 6px; padding: 2px 7px; margin-top: 4px; }
+    background: color-mix(in srgb, var(--amber) 14%, transparent); border-radius: 8px; padding: 6px 10px; margin-top: 6px; line-height: 1.4; }
   .rowacts { display: flex; gap: 8px; flex: 0 0 auto; }
   .rowacts button { background: var(--fill); border: 0; color: var(--blue); font: inherit; font-size: 14px; font-weight: 600;
     border-radius: 10px; padding: 0 12px; min-height: 36px; min-width: 44px; }
@@ -177,7 +177,7 @@
   input[type=text], input[type=date], select { width: 100%; background: var(--input); color: var(--text);
     border: .5px solid var(--fill2); border-radius: 12px; padding: 13px 14px; font-size: 15px;
     font-family: inherit; -webkit-appearance: none; appearance: none; }
-  #view-add input[type=text], #view-add input[type=date], #view-add select { background: var(--fill); border-color: var(--fill2); }
+  #addForm input[type=text], #addForm input[type=date], #addForm select { background: var(--fill); border-color: var(--fill2); }
   .chips button.sel { background: var(--accent); color: #fff; }
   .btn { width: 100%; background: var(--accent); color: #fff; border: 0; border-radius: 12px; padding: 14px;
     font-size: 16px; font-weight: 700; margin-top: 14px; font-family: inherit; transition: transform .08s; }
@@ -200,20 +200,30 @@
   .skel { background: linear-gradient(90deg, var(--skel-a) 25%, var(--skel-b) 50%, var(--skel-a) 75%);
     background-size: 200% 100%; animation: shimmer 1.3s linear infinite; border-radius: 7px; }
   @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
-  /* First-load motion: cards rise in with a small stagger; bars/ring sweep via transitions. */
-  @keyframes cardIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
-  .firstpaint .card { animation: cardIn .38s cubic-bezier(.22,.9,.34,1) both; }
-  .firstpaint .card:nth-of-type(2) { animation-delay: .05s; }
-  .firstpaint .card:nth-of-type(3) { animation-delay: .1s; }
-  .firstpaint .card:nth-of-type(4) { animation-delay: .15s; }
-  .firstpaint .card:nth-of-type(5) { animation-delay: .2s; }
-  .firstpaint .card:nth-of-type(6) { animation-delay: .25s; }
+  /* First-load motion: the hero counts up and the bars sweep (one authored moment). */
   #view-overview circle[data-dash] { transition: stroke-dasharray .7s cubic-bezier(.22,.9,.34,1); }
   #tab-refresh.busy .ico svg { animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) {
-    .skel, .firstpaint .card, #tab-refresh.busy .ico svg { animation: none; }
+    .skel, #tab-refresh.busy .ico svg { animation: none; }
     .fill, #view-overview circle[data-dash] { transition: none; }
+  }
+  /* Repeat chips: one quiet horizontal row, visually distinct from category chips. */
+  #recentChips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-left: -16px; margin-right: -16px; padding: 0 16px; }
+  #recentChips::-webkit-scrollbar { display: none; }
+  #recentChips button { background: none; flex: 0 0 auto; }
+  /* Category chips: a two-column grid, so "More…" never orphans on its own line. */
+  .chips.cats button[data-c], .chips.cats .more { flex: 1 1 calc(50% - 4px); text-align: center; }
+  /* The Add form inside a sheet: flat (the sheet is the surface), title as the sheet title. */
+  #addHost .seg { margin-top: 0; }
+  #addHost .card { background: none; padding: 0; margin-top: 34px; }
+  #addHost .card h3 { left: 0; right: 0; color: var(--text); font-size: 15px; font-weight: 600; }
+  #addHost details.help { margin-top: 10px; }
+  /* Wider screens (iPad, Mac): a phone-width column, not 1000px cards. */
+  @media (min-width: 560px) {
+    #app, #setup { max-width: 480px; margin-inline: auto; }
+    nav { left: 50%; right: auto; width: 448px; transform: translateX(-50%); }
+    #sheet .inner { max-width: 512px; margin-inline: auto; }
   }
 </style>
 </head>
@@ -249,6 +259,7 @@
       <div id="more-dyn"></div>
     </div>
     <div id="view-add" class="hidden">
+      <form id="addForm" novalidate autocomplete="off">
       <div class="seg" role="group" aria-label="What are you logging">
         <button type="button" id="modeSpend" aria-pressed="true">Spend</button>
         <button type="button" id="modePaid" aria-pressed="false">Paid back</button></div>
@@ -264,20 +275,21 @@
         </div>
         <div style="margin-top:10px"><input type="text" id="addMerchant" aria-label="Merchant" placeholder="Merchant" autocomplete="off"></div>
         <div class="fieldlabel" id="catLabel">Category &mdash; optional, the rules decide</div>
-        <div class="chips" id="addChips" role="group" aria-labelledby="catLabel"></div>
+        <div class="chips cats" id="addChips" role="group" aria-labelledby="catLabel"></div>
         <div id="frontBlock">
           <div class="fieldlabel" id="frontLabel">Paid for someone? (optional)</div>
           <div style="margin-top:14px"><input type="text" id="addFronted" list="frontedNames" aria-labelledby="frontLabel" placeholder="Their name" autocomplete="off"></div>
           <div class="chips hidden" id="nameChips" role="group" aria-label="People who owe you" style="margin-top:10px"></div>
         </div>
         <datalist id="frontedNames"></datalist>
-        <button type="button" class="linkbtn" id="extraToggle">Today &middot; change date or add a note</button>
+        <button type="button" class="linkbtn" id="extraToggle" aria-expanded="false">More options &middot; date, note, paid for someone</button>
         <div id="addExtra" class="hidden" style="display:flex;gap:10px;margin-top:14px">
           <input type="date" id="addDate" aria-label="Date" style="flex:1">
           <input type="text" id="addNote" aria-label="Note" placeholder="Note (optional)" style="flex:1.3" autocomplete="off"></div>
-        <button class="btn" id="addSave">Log spend</button>
+        <button class="btn" id="addSave" type="submit">Log spend</button>
       </div>
-      <details class="help"><summary>How logging works</summary><ul>
+      </form>
+      <details class="help" id="addHelp"><summary>How logging works</summary><ul>
         <li>Same pipeline as Apple Pay taps &mdash; dedup, alerts and budgets included.</li>
         <li>No category? The rules decide, or it lands in Review.</li>
         <li>Paid for a friend? Put their name in &ldquo;Paid for someone&rdquo; &mdash; Overview&rsquo;s Owed card tracks it.</li>
@@ -296,6 +308,6 @@
   <div id="sheet" class="hidden"></div>
   <div id="toast" role="status" aria-live="polite"></div>
   <!-- bump ?v= on every app.js change: Safari/PWA caches are sticky -->
-  <script src="app.js?v=26"></script>
+  <script src="app.js?v=27"></script>
 </body>
 </html>
