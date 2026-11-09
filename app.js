@@ -7,7 +7,7 @@
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
-const APP_VERSION = 28; // keep in step with index.html's app.js?v=
+const APP_VERSION = 29; // keep in step with index.html's app.js?v=
 // The backend address is fixed and not secret (auth lives in the key), so connecting
 // only truly requires the key itself.
 const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
@@ -16,6 +16,10 @@ const BASE_CATS = ['Food', 'Groceries', 'Transport', 'Fuel', 'Shopping', 'Health
 // the reserved values a person never picks as a category.
 const CANON_CATS = ['Food', 'Groceries', 'Transport', 'Fuel', 'Shopping', 'Health', 'Subscriptions',
   'Phone & Internet', 'Family', 'Entertainment', 'Travel Fund'];
+// The connected sheet's own chips (snapshot.pickable: its Budgets tab, then its
+// Rules) — the app is shared, so another owner sees their categories, not these.
+// The built-in list is only the fallback for a backend that doesn't send one.
+const canonCats = () => (data && Array.isArray(data.pickable) && data.pickable.length ? data.pickable : CANON_CATS);
 const NOT_PICKABLE = { Uncategorized: 1, REVIEW: 1, 'DUPLICATE?': 1 };
 
 let cfg = null;
@@ -294,10 +298,10 @@ function topCats(suggested) {
   const count = {};
   (data && data.monthRows || []).forEach((t) => { count[t.category] = (count[t.category] || 0) + 1; });
   const used = Object.keys(count).filter((c) => !NOT_PICKABLE[c]).sort((a, b) => count[b] - count[a]);
-  return [...new Set([...(suggested || []), ...used, ...Object.keys((data && data.budgets) || {}), ...CANON_CATS])];
+  return [...new Set([...(suggested || []), ...used, ...Object.keys((data && data.budgets) || {}), ...canonCats()])];
 }
 function pickableCats(allowReserved) {
-  return [...new Set([...CANON_CATS, ...((data && data.categories) || []), ...Object.keys((data && data.budgets) || {}),
+  return [...new Set([...canonCats(), ...((data && data.categories) || []), ...Object.keys((data && data.budgets) || {}),
     ...(allowReserved ? ['TRANSFER', 'REFUND'] : [])])]
     .filter((c) => !NOT_PICKABLE[c] && (allowReserved || (c !== 'TRANSFER' && c !== 'REFUND')));
 }
