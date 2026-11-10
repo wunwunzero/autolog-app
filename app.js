@@ -3,11 +3,13 @@
    GET  ?view=data&key=…              -> snapshot JSON
    POST {action:'categorize'|'quickadd'|'undo_quickadd'|'set_fronted', key,…} — the view
         key's only mutations (set_fronted changes just the "fronted:" tag in Notes)
+   POST {action:'flip_imported', key, id} — backend v47+: flips a fresh import between
+        spend and money back (an older backend answers 'unauthorized')
    Config { url, key } lives in localStorage only. ?demo=1 renders sample data. */
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
-const APP_VERSION = 29; // keep in step with index.html's app.js?v=
+const APP_VERSION = 30; // keep in step with index.html's app.js?v=
 // The backend address is fixed and not secret (auth lives in the key), so connecting
 // only truly requires the key itself.
 const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
@@ -39,7 +41,30 @@ const DEMO = {
   buffer: { balanceMYR: 1810, floorMYR: 2500 },
   audit: { cashMYR: 11431.4, autologMYR: -900.2, unbilledMYR: 543.6, asOf: '2026-08-18 07:31' },
   projByCat: { Food: 246, Groceries: 470, Transport: 73.4, Subscriptions: 54.9, Fuel: 80, 'Phone & Internet': 50 },
-  history: { '2026-07': { Food: 512.3, Groceries: 380, Transport: 96.5 }, '2026-06': { Food: 640.1, Groceries: 402.2, Transport: 88 } },
+  history: {
+    '2026-07': { Food: 512.3, Groceries: 380, Transport: 96.5, Fuel: 210, Shopping: 148.9, Subscriptions: 54.9, 'Phone & Internet': 50 },
+    '2026-06': { Food: 640.1, Groceries: 402.2, Transport: 88, Fuel: 185.4, Shopping: 62, Subscriptions: 54.9, 'Phone & Internet': 50 },
+    '2026-05': { Food: 478.6, Groceries: 356.8, Transport: 120.3, Fuel: 232.1, Subscriptions: 54.9, 'Phone & Internet': 50 },
+    '2026-04': { Food: 590.2, Groceries: 421.5, Transport: 74, Fuel: 198, Shopping: 310, Subscriptions: 49.9, 'Phone & Internet': 50 },
+    '2026-03': { Food: 533.4, Groceries: 398.1, Transport: 101.2, Fuel: 176.5, Subscriptions: 49.9, 'Phone & Internet': 50 },
+    '2026-02': { Food: 455, Groceries: 342.6, Transport: 66.8, Fuel: 160, Shopping: 89, Subscriptions: 49.9, 'Phone & Internet': 50 }
+  },
+  recap: { month: '2026-07', label: 'July 2026', prevMonth: '2026-06', prevLabel: 'June', total: 1452.6, count: 41, prevTotal: 1482.6,
+    byCategory: [
+      { category: 'Food', amount: 512.3, prev: 640.1, delta: -127.8, planned: 600 },
+      { category: 'Groceries', amount: 380, prev: 402.2, delta: -22.2, planned: 450 },
+      { category: 'Fuel', amount: 210, prev: 185.4, delta: 24.6, planned: 250 },
+      { category: 'Shopping', amount: 148.9, prev: 62, delta: 86.9 },
+      { category: 'Transport', amount: 96.5, prev: 88, delta: 8.5, planned: 200 },
+      { category: 'Subscriptions', amount: 54.9, prev: 54.9, delta: 0, planned: 60 },
+      { category: 'Phone & Internet', amount: 50, prev: 50, delta: 0, planned: 50 } ],
+    top: [
+      { date: '2026-07-19', merchant: 'Village Grocer', amountMYR: 186.4, category: 'Groceries' },
+      { date: '2026-07-06', merchant: 'Uniqlo Mid Valley', amountMYR: 129, category: 'Shopping' },
+      { date: '2026-07-12', merchant: 'Shell Kota Damansara', amountMYR: 95, category: 'Fuel' },
+      { date: '2026-07-25', merchant: 'Din Tai Fung', amountMYR: 88.6, category: 'Food' },
+      { date: '2026-07-02', merchant: 'Jaya Grocer', amountMYR: 82.3, category: 'Groceries' } ],
+    savings: { from: '2026-07-01', to: '2026-08-01', buffer: { start: 1500, end: 1810, delta: 310 }, ef: { start: 2100, end: 2446.21, delta: 346.21 } } },
   monthRows: [
     { id: 'm1', date: '2026-08-18', merchant: 'Starbucks KLIA2', amountMYR: 19.5, category: 'Food', source: 'applepay', fronted: null },
     { id: 'm2', date: '2026-08-16', merchant: 'KBBQ dinner', amountMYR: 90, category: 'Food', source: 'applepay', fronted: 'Mei' },
@@ -60,7 +85,7 @@ const DEMO = {
   recent: [
     { id: 'r1', date: '2026-08-18', merchant: 'BIG Pharmacy', amountMYR: 22.9, category: 'Health', source: 'applepay' },
     { id: 'm1', date: '2026-08-18', merchant: 'Starbucks KLIA2', amountMYR: 19.5, category: 'Food', source: 'applepay' },
-    { id: 'r3', date: '2026-08-12', merchant: 'Shopee MY', amountMYR: -35, category: 'REFUND', source: 'statement' },
+    { id: 'r3', date: '2026-08-12', merchant: 'Shopee MY', amountMYR: -35, category: 'REFUND', source: 'statement', createdMs: Date.now() - 2 * 86400e3 },
     { id: 'r4', date: '2026-08-10', merchant: 'Family transfer', amountMYR: 400, category: 'Family', source: 'manual' },
     { id: 'r5', date: '2026-08-05', merchant: 'YES phone bill', amountMYR: 50, category: 'Phone & Internet', source: 'manual' }
   ]
@@ -68,6 +93,10 @@ const DEMO = {
 
 const fmt = (v) => (v < 0 ? '-' : '') + 'RM' + Math.abs(v).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+// Backend v47 always sends a `recap` key (possibly null); v46 has none. Everything
+// new in app v30 hides itself behind this, so v30 on a v46 backend is v29.
+const hasV47 = () => !!data && 'recap' in data;
 // '2026-08-28' -> '28 Aug 2026' (string-split, no Date parsing: avoids timezone drift)
 function fmtCoverageDate(iso) {
   const p = String(iso).split('-');
@@ -434,6 +463,8 @@ function renderOverview() {
       <div class="rowacts"><button type="button" data-todo="${i}">Done</button></div></div>`).join('') + `</div>`;
   }
 
+  if (data.recap && data.dayOfMonth <= 7) html += recapEntryHtml();
+
   if (bCats.length) {
     const rows = bCats.map((c) => {
       const s = byCat[c] || 0;
@@ -510,6 +541,7 @@ function renderOverview() {
   view.querySelectorAll('button[data-todo]').forEach((b) => {
     b.addEventListener('click', () => { dropActualTodo(Number(b.dataset.todo)); renderOverview(); });
   });
+  view.querySelectorAll('.txn[data-recap]').forEach((el) => el.addEventListener('click', openRecapSheet));
 
 
   const undoBtn = $('undoBtn');
@@ -627,12 +659,12 @@ function sheetKeys(e) {
 
 // In-app confirm (replaces window.confirm): the destructive action is a big,
 // clearly coloured button, and the question stays readable on the sheet.
-function confirmSheet(title, body, confirmLabel, alt) {
+function confirmSheet(title, body, confirmLabel, alt, plain) {
   return new Promise((resolve) => {
     let answered = false;
     const sheet = mountSheet(`<div id="sheetTitle" style="font-size:17px;font-weight:700">${title}</div>
       <div class="muted" style="font-size:14px;margin-top:6px;line-height:1.45">${body}</div>
-      <button class="btn danger" id="confirmYes">${confirmLabel}</button>
+      <button class="btn${plain ? '' : ' danger'}" id="confirmYes">${confirmLabel}</button>
       ${alt ? `<button class="btn quiet" id="confirmAlt">${alt.label}</button>` : ''}`, 'Cancel');
     const finish = (v) => { if (!answered) { answered = true; resolve(v); } };
     sheet.querySelector('#confirmYes').addEventListener('click', () => { finish(true); closeSheet(); });
@@ -641,6 +673,109 @@ function confirmSheet(title, body, confirmLabel, alt) {
   });
 }
 let sheetOnClose = null;
+
+// Column chart of the finished months (v30). One colour, no legend; each column
+// is a button, the newest month picked by default; the readout above shows the
+// picked month's real value (a net-negative month draws no bar).
+function monthItems(valueOf) {   // oldest first
+  const hist = data.history || {};
+  return Object.keys(hist).sort().map((m) => {
+    const p = m.split('-');
+    return { key: m, label: MONTHS[Number(p[1]) - 1], full: MONTH_NAMES[Number(p[1]) - 1] + ' ' + p[0], value: valueOf(hist[m], m) };
+  });
+}
+function colChartHtml(id, items) {
+  if (!hasV47() || items.length < 2 || !items.some((x) => x.value > 0)) return '';
+  const max = Math.max(...items.map((x) => x.value), 0.01);
+  const avg = items.reduce((s, x) => s + x.value, 0) / items.length;
+  const last = items.length - 1;
+  return `<div class="colchart" id="${id}">
+    <div class="readout"><div><span class="v num"></span><span class="l"></span></div><div class="avg">avg ${fmt(avg)} a month</div></div>
+    <div class="extra"></div>
+    <div class="plot" role="group" aria-label="Spending by month">${items.map((x, i) => `<button type="button" class="col" data-i="${i}" aria-pressed="${i === last}" aria-label="${esc(x.full)}: ${esc(fmt(x.value))}">
+      <span class="area"><span class="bar" style="height:${x.value > 0 ? Math.max(2, Math.round(x.value / max * 100)) : 0}%"></span></span><span class="lab">${esc(x.label)}</span></button>`).join('')}</div></div>`;
+}
+function wireColChart(root, id, items) {
+  const el = root.querySelector('#' + id);
+  if (!el) return;
+  const pick = (i) => {
+    const x = items[i];
+    el.querySelector('.v').textContent = fmt(x.value);
+    el.querySelector('.l').textContent = x.full;
+    el.querySelector('.extra').textContent = x.extra || '';
+    el.querySelectorAll('.col').forEach((b, j) => b.setAttribute('aria-pressed', String(j === i)));
+  };
+  el.querySelectorAll('.col').forEach((b) => {
+    const i = Number(b.dataset.i);
+    b.addEventListener('click', () => pick(i));
+    b.addEventListener('focus', () => pick(i));
+    b.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') pick(i); });
+  });
+  pick(items.length - 1);
+}
+// Whole-month totals for the More tab: the value nets every category; the line
+// under the readout names the month's three biggest.
+function monthTotalItems() {
+  const items = monthItems((h) => Math.round(Object.keys(h).reduce((s, c) => s + (Number(h[c]) || 0), 0) * 100) / 100);
+  const hist = data.history || {};
+  items.forEach((x) => {
+    x.extra = Object.keys(hist[x.key]).filter((c) => hist[x.key][c] > 0).sort((p, q) => hist[x.key][q] - hist[x.key][p])
+      .slice(0, 3).map((c) => c + ' ' + fmt(hist[x.key][c])).join(' · ');
+  });
+  return items;
+}
+
+// Last month's recap (backend v47 `recap`; null when that month has no rows).
+// "RM12.00 less than June" / "the same as June"; '' when there is nothing to compare.
+function versusPrev(delta, prevLabel) {
+  if (typeof delta !== 'number' || !prevLabel) return '';
+  if (Math.abs(delta) < 0.005) return 'the same as ' + prevLabel;
+  return `${fmt(Math.abs(delta))} ${delta < 0 ? 'less' : 'more'} than ${prevLabel}`;
+}
+function recapEntryHtml() {
+  const r = data.recap;
+  const vs = typeof r.prevTotal === 'number' ? versusPrev(r.total - r.prevTotal, r.prevLabel) : '';
+  const sub = plural(r.count, 'transaction') + (vs ? ' · ' + vs : '');
+  return `<div class="card"><h3>Last month</h3><div class="txn tappable" role="button" tabindex="0" data-recap="1"
+    aria-label="${esc(`${r.label} recap: ${fmt(r.total)}, ${sub}. Open`)}"><div style="min-width:0;flex:1">
+    <div class="m">${esc(r.label)} recap</div><div class="sub">${esc(sub)}</div></div>
+    <div class="val">${fmt(r.total)}</div><span class="chev" aria-hidden="true">&rsaquo;</span></div></div>`;
+}
+function openRecapSheet() {
+  const r = data.recap;
+  if (!r) return;
+  const head = (t) => `<div class="fieldlabel" style="margin:20px 0 0 2px">${t}</div>`;
+  const money = (v) => v < 0 ? ['val in', '+' + fmt(-v)] : ['val', fmt(v)];
+  let vsLine = '';
+  if (typeof r.prevTotal === 'number') {
+    const d = r.total - r.prevTotal;
+    const tone = Math.abs(d) < 0.005 ? 'var(--muted)' : d < 0 ? 'var(--green)' : 'var(--amber)';
+    vsLine = `<div style="font-size:13px;margin-top:6px;color:${tone}">${esc(versusPrev(d, r.prevLabel))} (${fmt(r.prevTotal)})</div>`;
+  }
+  const cats = (r.byCategory || []).map((c) => {
+    const vs = c.delta === null || c.delta === undefined || (c.prev === 0 && c.delta > 0)
+      ? (r.prevLabel && typeof r.prevTotal === 'number' ? 'nothing in ' + r.prevLabel : '')
+      : versusPrev(c.delta, r.prevLabel).replace(/^the same as/, 'same as');
+    const sub = [vs, typeof c.planned === 'number' ? 'planned ' + fmt(c.planned) : ''].filter(Boolean).join(' · ');
+    const [cls, val] = money(c.amount);
+    return `<div class="txn">${catIcon(c.category)}<div style="min-width:0;flex:1"><div class="m">${esc(c.category)}</div>
+      ${sub ? `<div class="sub">${esc(sub)}</div>` : ''}</div><div class="${cls}">${val}</div></div>`;
+  }).join('');
+  const top = (r.top || []).map((t) => `<div class="txn">${catIcon(t.category)}<div style="min-width:0;flex:1">
+    <div class="m">${esc(t.merchant || '(no merchant)')}</div><div class="sub">${esc(fmtDay(t.date))} &middot; ${esc(t.category)}</div></div>
+    <div class="val">${fmt(t.amountMYR)}</div></div>`).join('');
+  const s = r.savings;
+  const pot = (name, p) => p ? `<div class="txn"><div style="min-width:0;flex:1"><div class="m">${name}</div>
+    <div class="sub">${fmt(p.start)} &rarr; ${fmt(p.end)}</div></div>
+    <div class="val${p.delta > 0 ? ' in' : ''}"${p.delta < 0 ? ' style="color:var(--amber)"' : ''}>${p.delta > 0 ? '+' : ''}${fmt(p.delta)}</div></div>` : '';
+  const pots = s ? pot('Buffer', s.buffer) + pot('Emergency Fund', s.ef) : '';
+  showSheet(`<div id="sheetTitle" style="font-size:17px;font-weight:700">${esc(r.label)} recap</div>
+    <div style="display:flex;align-items:baseline;gap:8px;margin-top:6px"><div class="num" style="font-size:30px;font-weight:800;letter-spacing:-.6px">${fmt(r.total)}</div>
+      <div class="muted" style="font-size:13px">${plural(r.count, 'transaction')}</div></div>${vsLine}
+    ${cats ? head('By category') + `<div>${cats}</div>` : ''}
+    ${top ? head('Biggest spends') + `<div>${top}</div>` : ''}
+    ${pots ? head(`Savings &middot; ${esc(fmtDay(s.from))} to ${esc(fmtDay(s.to))}`) + `<div>${pots}</div>` : ''}`);
+}
 
 // Drill-down: every transaction in one category this month (backend monthRows).
 function openCategorySheet(cat) {
@@ -667,10 +802,13 @@ function openCategorySheet(cat) {
         return `${MONTHS[Number(p[1]) - 1]}: <b style="color:var(--text)">${fmt(hist[m][cat] || 0)}</b>`;
       }).join(' &middot; ')}</div>`
     : '';
+  const chartItems = monthItems((h) => h[cat] || 0);
+  const chart = colChartHtml('catChart', chartItems);
   const sheet = showSheet(`<div id="sheetTitle" style="font-size:17px;font-weight:700">${esc(cat)}</div>
-    <div class="muted" style="font-size:13px;margin-top:2px">${plural(rows.length, 'transaction')} this month &middot; ${fmt(total)}${cap ? ' of ' + fmt(cap) : ''}</div>${trend}${histLine}
+    <div class="muted" style="font-size:13px;margin-top:2px">${plural(rows.length, 'transaction')} this month &middot; ${fmt(total)}${cap ? ' of ' + fmt(cap) : ''}</div>${trend}${chart || histLine}
     <div style="margin-top:6px">${rows.length ? rows.map((t, i) => txnRow(t, 'data-mi="' + i + '"')).join('')
       : '<div class="muted" style="font-size:14px;padding:14px 0">Nothing yet this month.</div>'}</div>`);
+  wireColChart(sheet, 'catChart', chartItems);
   sheet.querySelectorAll('.txn[data-mi]').forEach((el) => {
     // Opening a row keeps the way back: its Close returns to this list.
     el.addEventListener('click', () => openRowSheet(rows[Number(el.dataset.mi)], () => openCategorySheet(cat)));
@@ -707,6 +845,48 @@ async function removeImported(id) {
 async function fixImported(id, amount) {
   if (isDemo()) return { ok: true, amountMYR: Number(amount) };
   return postJson({ action: 'fix_imported', id, amount });
+}
+
+// Flip a fresh import between spend and money back (backend v47 flip_imported):
+// for a refund the parser read as a spend, or the reverse. The backend allows it
+// for 13 days after the import; TRANSFER and DUPLICATE? rows never flip.
+const FLIP_WINDOW_MS = 13 * 24 * 3600e3;
+function flippable(t) {
+  return hasV47() && ['statement', 'tng', 'alipay'].includes(t.source) &&
+    !!t.createdMs && Date.now() - t.createdMs < FLIP_WINDOW_MS &&
+    typeof t.amountMYR === 'number' && t.amountMYR !== 0 && t.category !== 'TRANSFER' && t.category !== 'DUPLICATE?';
+}
+async function flipImported(t) {
+  if (isDemo()) {
+    const toSpend = t.amountMYR < 0;
+    const unset = !t.category || t.category === 'REFUND' || t.category === 'Uncategorized';
+    const category = toSpend ? (unset ? 'Uncategorized' : t.category) : (unset ? 'REFUND' : t.category);
+    return { ok: true, id: t.id, merchant: t.merchant, wasMYR: t.amountMYR, amountMYR: -t.amountMYR, wasCategory: t.category, category, inActual: true, heldBack: category === 'Uncategorized' };
+  }
+  return postJson({ action: 'flip_imported', id: t.id });
+}
+async function flipRow(t, after) {
+  const toSpend = t.amountMYR < 0;
+  const unset = !t.category || t.category === 'REFUND' || t.category === 'Uncategorized';
+  const what = `${fmt(Math.abs(t.amountMYR))} &middot; ${esc(fmtDay(t.date))}<br>`;
+  const yes = await confirmSheet(`${esc(t.merchant || 'This row')}: ${toSpend ? 'really a spend?' : 'really a refund?'}`,
+    what + (toSpend
+      ? (unset ? 'It will count as money out. It takes the category your rules give this merchant; if no rule knows it, it waits in Review.'
+        : `It will count as money out of ${esc(t.category)}.`)
+      : (unset ? 'It will count as money back, filed as a refund.'
+        : `It will count as money back and stays in ${esc(t.category)}, so it nets against that envelope.`)),
+    toSpend ? 'Make it a spend' : 'Make it a refund', null, true);
+  if (!yes) return;
+  try {
+    const r = await flipImported(t);
+    if (!r.ok) throw new Error(r.error === 'unauthorized' ? 'Flipping needs the newer backend — not live yet' : (r.error || 'rejected'));
+    const tail = r.heldBack ? ' · waiting in Review for a category' : r.inActual ? ' · Actual updates on the next sync' : '';
+    toast(`${t.merchant}: now ${r.amountMYR < 0 ? 'money back' : 'a spend'} of ${fmt(Math.abs(r.amountMYR))}${tail}`);
+    if (after) after(r);
+    refresh();
+  } catch (err) {
+    toast('Failed: ' + friendly(err));
+  }
 }
 
 // A row a screenshot import added in the last 24h can be removed as "not real".
@@ -812,7 +992,8 @@ function openRowSheet(t, back) {
     <div class="muted" style="font-size:13px;margin-top:2px">${esc(fmtDay(t.date))} &middot; ${t.amountMYR === null ? 'no amount' : fmt(t.amountMYR)} &middot; ${esc(srcLabel(t.source))}</div>
     <div class="fieldlabel" id="rowCatLabel">Category${NOT_PICKABLE[t.category] ? ' &mdash; not set yet' : ''}</div>
     <div class="chips cats" id="rowCats" role="group" aria-labelledby="rowCatLabel">${catChipsHtml(pickableCats(true),
-      topCats([...(NOT_PICKABLE[t.category] ? [] : [t.category]), ...(suggestCategory(t) ? [suggestCategory(t)] : [])]), t.category)}</div>${removeBlock}${editBlock}
+      topCats([...(NOT_PICKABLE[t.category] ? [] : [t.category]), ...(suggestCategory(t) ? [suggestCategory(t)] : [])]), t.category)}</div>${removeBlock}${flippable(t)
+      ? `<button type="button" class="linkbtn" id="flipBtn">Actually a ${t.amountMYR < 0 ? 'spend' : 'refund'}? Flip it &rsaquo;</button>` : ''}${editBlock}
     <button type="button" class="linkbtn" id="frontToggle" aria-expanded="${t.fronted ? 'true' : 'false'}" aria-controls="frontRow">${t.fronted ? 'Fronted for ' + esc(t.fronted) : (t.amountMYR !== null && t.amountMYR < 0 ? 'Repayment from someone?' : 'Paid this for someone?')} &rsaquo;</button>
     <div id="frontRow" class="${t.fronted ? '' : 'hidden'}">
     <div class="muted" style="font-size:13px;margin-top:2px">${t.amountMYR !== null && t.amountMYR < 0
@@ -864,6 +1045,8 @@ function openRowSheet(t, back) {
   if (notRealBtn) notRealBtn.addEventListener('click', () => { sheetOnClose = null; notReal(t); });
   const fixBtn = sheet.querySelector('#fixBtn');
   if (fixBtn) fixBtn.addEventListener('click', () => { sheetOnClose = null; fixAmountSheet(t); });
+  const flipBtn = sheet.querySelector('#flipBtn');
+  if (flipBtn) flipBtn.addEventListener('click', () => { sheetOnClose = null; flipRow(t); });
   const editSave = sheet.querySelector('#editSave');
   if (editSave) {
     editSave.addEventListener('click', async () => {
@@ -941,6 +1124,10 @@ function renderMore() {
   html += `<div class="card"><h3>Search this month</h3>
     <div><input type="search" id="searchBox" aria-label="Search this month" placeholder="Merchant or amount, e.g. ikea or 117" autocomplete="off" style="background:var(--fill)"></div>
     <div id="searchOut"></div></div>`;
+  if (data.recap) html += recapEntryHtml();
+  const monthChartItems = monthTotalItems();
+  const monthChart = colChartHtml('monthChart', monthChartItems);
+  if (monthChart) html += `<div class="card"><h3>Spending by month</h3>${monthChart}</div>`;
   // Emergency Fund progress (bridge-mirrored daily; older backends omit the field).
   // The bar shows progress toward a soft 3-month cushion of CORE OUTFLOW (loan,
   // bills, living envelopes — the backend's efMonthlyBasisMYR). Budgets-tab caps
@@ -1007,6 +1194,8 @@ function renderMore() {
   const q = $('searchBox') ? $('searchBox').value : '';
   view.innerHTML = html;
   animateFills('more-dyn');
+  wireColChart(view, 'monthChart', monthChartItems);
+  view.querySelectorAll('.txn[data-recap]').forEach((el) => el.addEventListener('click', openRecapSheet));
   const auditBtn = $('auditBtn');
   if (auditBtn) auditBtn.addEventListener('click', runAudit);
   [['styleSheet', 'sheet'], ['styleTab', 'tab']].forEach(([id, v]) => $(id).addEventListener('click', () => {
@@ -1430,11 +1619,14 @@ async function uploadAndProcess() {
     }
     status.textContent = 'Processing (OCR + reconcile) — this can take a minute…';
     const p = isDemo()
-      ? { ok: true, summary: { processed: ['Screenshot (statement): demo.png'], matched: 4, added: 2, refunds: 0, unsupported: [], unparsed: 1, transferCheck: null } }
+      ? { ok: true, summary: { processed: ['Screenshot (statement): demo.png'], matched: 5, added: 3, refunds: 1, unsupported: [], unparsed: 1, transferCheck: null,
+          files: [{ name: 'IMG_2041.PNG', label: 'HSBC', found: 6, already: 4, added: 2, ignored: 0, repeated: 0, unreadable: 0, missedAmounts: 0, unaccounted: 0, ok: true },
+            { name: 'IMG_2042.PNG', label: 'HSBC', found: 3, already: 1, added: 1, ignored: 1, repeated: 0, unreadable: 1, missedAmounts: 1, unaccounted: 0, ok: false }] } }
       : await postJson({ action: 'process_inbox_app' });
     if (isDemo()) p.summary.addedRows = [
-      { id: 'x1', date: '2026-08-18', merchant: 'SUBWAY-PETRONAS TTDI', amountMYR: 1300, category: 'Food', source: 'statement', createdMs: Date.now() },
-      { id: 'x2', date: '2026-08-18', merchant: 'AEON CO-BANDAR PUCHON', amountMYR: 23.7, category: 'Groceries', source: 'statement', createdMs: Date.now() }];
+      { id: 'x1', date: '2026-08-18', merchant: 'SUBWAY-PETRONAS TTDI', amountMYR: 1300, category: 'Food', source: 'statement', createdMs: Date.now(), unusual: true, usualMax: 18.9 },
+      { id: 'x2', date: '2026-08-18', merchant: 'AEON CO-BANDAR PUCHON', amountMYR: 23.7, category: 'Groceries', source: 'statement', createdMs: Date.now() },
+      { id: 'x3', date: '2026-08-17', merchant: 'SHOPEE MY', amountMYR: -35, category: 'REFUND', source: 'statement', createdMs: Date.now(), credit: true }];
     if (!p.ok) throw new Error(p.error || 'processing failed');
     const s = p.summary || {};
     if (s.nothingNew) { status.innerHTML = '<span class="muted">Uploaded, but nothing new to process (already handled?).</span>'; return; }
@@ -1453,18 +1645,45 @@ async function uploadAndProcess() {
 // The import result is judged, not just counted (critique 29 Sep 2026): the
 // headline is only green when nothing needs a look; amounts far off their
 // category's usual size are flagged; every added row has Fix amount / Not real.
+// Why an added row deserves a second look: the backend's own checks first
+// (v47: credit / unusual for this merchant), then the app's category-size guard.
+function importFlag(r) {
+  if (r.credit) return 'came in as money back &mdash; flip it if it was really a spend';
+  if (r.unusual) return `over 3&times; the most you&rsquo;ve paid here before${typeof r.usualMax === 'number' ? ' (' + fmt(r.usualMax) + ')' : ''}`;
+  return amountFlag(r) || (r.large ? 'large for a place with little history' : null);
+}
+// One screenshot's line census (v47 summary.files): every line it showed is
+// either already logged, added, skipped on purpose or repeated — or it says why not.
+function fileCheckHtml(f) {
+  const parts = [`${f.already} already logged`, `${f.added} added`];
+  if (f.ignored) parts.push(`${f.ignored} skipped on purpose`);
+  if (f.repeated) parts.push(`${f.repeated} repeated from another screenshot`);
+  const why = [];
+  if (!f.found) why.push('nothing readable &mdash; is it the right app, and a screenshot rather than a photo?');
+  if (f.missedAmounts) why.push(`${plural(f.missedAmounts, 'amount')} on it didn&rsquo;t become a row &mdash; could be a balance or a total, but check nothing is missing`);
+  if (f.unreadable) why.push(`${plural(f.unreadable, 'line')} couldn&rsquo;t be read`);
+  if (f.unaccounted) why.push(`${plural(f.unaccounted, 'line')} not accounted for &mdash; that&rsquo;s a bug worth reporting`);
+  return `<div class="filecheck"><span class="mark ${f.ok ? 'ok' : 'warn'}" aria-hidden="true">${f.ok ? '&#x2713;&#xfe0e;' : '!'}</span>
+    <div><span class="sr-only">${f.ok ? 'OK' : 'Check'}: </span><b>${esc(f.name)}</b>${f.label ? ' &middot; ' + esc(f.label) : ''}${f.found
+      ? ` &mdash; ${plural(f.found, 'line')}: ${parts.join(', ')}` : ''}
+    ${why.map((w) => `<div class="why">${w}</div>`).join('')}</div></div>`;
+}
 function renderImportSummary(s) {
   const status = $('uploadStatus');
   const tc = s.transferCheck;
   const leaks = tc ? tc.unlogged.filter((u) => !u.budgetSide) : [];
   const added = (s.addedRows || []).map((r) => Object.assign({ createdMs: Date.now() }, r));
-  const flags = added.map((r) => amountFlag(r));
+  const flags = added.map((r) => importFlag(r));
+  const files = Array.isArray(s.files) ? s.files : [];
+  const badFiles = files.filter((f) => !f.ok).length;
   const nFlag = flags.filter(Boolean).length;
   const problems = (s.unsupported || []).length || leaks.length || (tc && tc.duplicates.length);
   let head;
   if (problems) head = `<b style="color:var(--red)">Imported ${s.added} &mdash; some things need attention</b>`;
-  else if (nFlag || s.unparsed) head = `<b style="color:var(--amber)">Imported ${s.added} &mdash; check ${nFlag ? nFlag + ' flagged amount' + (nFlag === 1 ? '' : 's') : 'the unreadable lines'}</b>`;
-  else if (s.added) head = `<b style="color:var(--green)">Imported ${plural(s.added, 'new row')}</b> &mdash; glance for misreads below`;
+  else if (nFlag || s.unparsed || badFiles) head = `<b style="color:var(--amber)">Imported ${s.added} &mdash; check ${[nFlag ? plural(nFlag, 'flagged row') : '', badFiles ? plural(badFiles, 'screenshot') : '']
+    .filter(Boolean).join(' and ') || 'the unreadable lines'}</b>`;
+  else if (s.added) head = `<b style="color:var(--green)">Imported ${plural(s.added, 'new row')}</b> &mdash; ${files.length
+    ? `every line on ${plural(files.length, 'screenshot')} accounted for` : 'glance for misreads below'}`;
   else head = `<b>Nothing new</b> &mdash; every line was already logged`;
   status.innerHTML = `<div style="margin-top:8px;line-height:1.6">${head}
     <div class="muted">${s.matched} already logged &middot; ${s.added} added &middot; ${plural(s.refunds, 'refund')}</div>
@@ -1476,6 +1695,7 @@ function renderImportSummary(s) {
     ${tc ? `<div>RHB transfer check: ${tc.matched} matched${leaks.length ? `, <span style="color:var(--red)">${leaks.length} with no ledger entry</span>` : ''}${tc.duplicates.length ? `, <span style="color:var(--red)">${plural(tc.duplicates.length, 'possible duplicate')}</span>` : ''}</div>
       ${leaks.length ? `<ul class="issues">${leaks.map((u) => `<li>${esc(fmtDay(u.date))} &middot; ${esc(u.desc)} &middot; ${fmt(Math.abs(u.amount))} &mdash; quick-add it if it was spending</li>`).join('')}</ul>` : ''}` : ''}
     <div class="muted" style="font-size:12px">Rows without a category wait in Review.</div></div>
+    ${files.length ? `<div class="fieldlabel" style="margin:18px 0 4px 0">Screenshots checked</div>${files.map(fileCheckHtml).join('')}` : ''}
     ${added.length ? `<div class="fieldlabel" style="margin:18px 0 0 0">Added &mdash; check each amount</div><div id="addedList"></div>` : ''}`;
   if (!added.length) return;
   const list = $('addedList');
@@ -1487,8 +1707,8 @@ function renderImportSummary(s) {
       <div class="m">${esc(r.merchant)}</div>
       <div class="sub">${esc(fmtDay(r.date))} &middot; ${esc(r.category)}</div>
       ${flags[i] ? `<div class="flag">${flags[i]}</div>` : ''}</div>
-      <div class="val">${r.amountMYR === null ? '—' : fmt(r.amountMYR)}</div>
-      <div class="rowacts">${r.amountMYR !== null ? `<button type="button" data-fix="${i}" aria-label="Fix amount for ${esc(r.merchant)}">Fix</button>` : ''}
+      <div class="val${r.amountMYR < 0 ? ' in' : ''}">${r.amountMYR === null ? '—' : r.amountMYR < 0 ? '+' + fmt(-r.amountMYR) : fmt(r.amountMYR)}</div>
+      <div class="rowacts">${r.credit && flippable(r) ? `<button type="button" data-flip="${i}" aria-label="Flip ${esc(r.merchant)} to a spend">Flip</button>` : ''}${r.amountMYR !== null ? `<button type="button" data-fix="${i}" aria-label="Fix amount for ${esc(r.merchant)}">Fix</button>` : ''}
       <button type="button" class="danger" data-nr="${i}" aria-label="${esc(r.merchant)} is not real — remove">Not real</button></div></div>`;
   }).join('');
   list.querySelectorAll('button[data-nr]').forEach((b) => b.addEventListener('click', () => {
@@ -1499,6 +1719,23 @@ function renderImportSummary(s) {
       row.style.opacity = '.5';
     });
   }));
+  list.querySelectorAll('button[data-flip]').forEach((b) => b.addEventListener('click', () => {
+    const r = added[Number(b.dataset.flip)];
+    flipRow(r, (res) => {
+      r.amountMYR = res.amountMYR;
+      r.category = res.category;
+      r.credit = res.amountMYR < 0;
+      const row = b.closest('.txn');
+      const val = row.querySelector('.val');
+      val.textContent = res.amountMYR < 0 ? '+' + fmt(-res.amountMYR) : fmt(res.amountMYR);
+      val.classList.toggle('in', res.amountMYR < 0);
+      row.querySelector('.sub').textContent = fmtDay(r.date) + ' · ' + res.category;
+      const f = row.querySelector('.flag');
+      if (f) f.remove();
+      b.textContent = 'Flipped';
+      b.disabled = true;
+    });
+  }));
   // One "fixed" handler per row, also used when Fix is reached from the
   // Not-real confirm ("Fix amount instead").
   list.querySelectorAll('button[data-fix]').forEach((b) => {
@@ -1506,7 +1743,7 @@ function renderImportSummary(s) {
     r._onFix = (amt) => {
       r.amountMYR = amt;
       const row = b.closest('.txn');
-      row.querySelector('.val').textContent = fmt(amt);
+      row.querySelector('.val').textContent = amt < 0 ? '+' + fmt(-amt) : fmt(amt);
       const f = row.querySelector('.flag');
       if (f) f.remove();
       b.textContent = 'Fixed';
