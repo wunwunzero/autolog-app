@@ -5,11 +5,15 @@
         key's only mutations (set_fronted changes just the "fronted:" tag in Notes)
    POST {action:'flip_imported', key, id} — backend v47+: flips a fresh import between
         spend and money back (an older backend answers 'unauthorized')
+   POST {action:'add_rule_app', key, id} — backend v48+: files the row's merchant keyword
+        (the `ruleKeyword` a categorize answer carried) as a rule; `search_rows` {q} —
+        backend v48+ (snapshot `searchMonths`): search past months. Both answer
+        'unauthorized' on an older backend.
    Config { url, key } lives in localStorage only. ?demo=1 renders sample data. */
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
-const APP_VERSION = 30; // keep in step with index.html's app.js?v=
+const APP_VERSION = 31; // keep in step with index.html's app.js?v=
 // The backend address is fixed and not secret (auth lives in the key), so connecting
 // only truly requires the key itself.
 const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
@@ -35,7 +39,8 @@ const DEMO = {
   budgets: { Food: 600, Groceries: 450, Transport: 200, Subscriptions: 60, Fuel: 250, 'Phone & Internet': 50 },
   fixedCats: ['Subscriptions', 'Phone & Internet', 'Family', 'Insurance'],
   categories: ['Food', 'Groceries', 'Transport', 'Fuel', 'Shopping', 'Health', 'Subscriptions'],
-  coverage: { tng: '2026-08-14', hsbc: '2026-08-16', rhb: null, alipay: '2026-08-15' },
+  coverage: { tng: '2026-08-14', hsbc: '2026-08-08', rhb: null, alipay: '2026-08-15' }, // hsbc 10 days behind generatedAt: shows the stale-capture line
+  searchMonths: 7,
   efBalanceMYR: 2446.21,
   efMonthlyBasisMYR: 6980,
   buffer: { balanceMYR: 1810, floorMYR: 2500 },
@@ -67,6 +72,7 @@ const DEMO = {
     savings: { from: '2026-07-01', to: '2026-08-01', buffer: { start: 1500, end: 1810, delta: 310 }, ef: { start: 2100, end: 2446.21, delta: 346.21 } } },
   monthRows: [
     { id: 'm1', date: '2026-08-18', merchant: 'Starbucks KLIA2', amountMYR: 19.5, category: 'Food', source: 'applepay', fronted: null },
+    { id: 'r1', date: '2026-08-18', merchant: 'BIG Pharmacy', amountMYR: 22.9, category: 'Health', source: 'applepay', fronted: null },
     { id: 'm2', date: '2026-08-16', merchant: 'KBBQ dinner', amountMYR: 90, category: 'Food', source: 'applepay', fronted: 'Mei' },
     { id: 'm3', date: '2026-08-14', merchant: 'Nasi lemak', amountMYR: 33.3, category: 'Food', source: 'tng', fronted: null },
     { id: 'm4', date: '2026-08-12', merchant: 'Village Grocer', amountMYR: 441.1, category: 'Groceries', source: 'applepay', fronted: null },
@@ -76,11 +82,12 @@ const DEMO = {
     { name: 'Ali', outstandingMYR: 180, since: '2026-08-10', count: 3 },
     { name: 'Mei', outstandingMYR: 45.5, since: '2026-08-16', count: 1 }
   ],
-  reviewTotal: 3,
+  reviewTotal: 4,
   review: [
     { id: 'd1', date: '2026-08-15', merchant: 'MYSTERY SHOP 88', amountMYR: 42, category: 'Uncategorized', source: 'statement' },
     { id: 'd2', date: '2026-08-13', merchant: 'PANAXIS SDN BHD', amountMYR: 11, category: 'Uncategorized', source: 'tng' },
-    { id: 'd3', date: '2026-08-11', merchant: 'OCEAN SKY', amountMYR: 13.7, category: 'Uncategorized', source: 'tng' }
+    { id: 'd3', date: '2026-08-11', merchant: 'OCEAN SKY', amountMYR: 13.7, category: 'Uncategorized', source: 'tng' },
+    { id: 'd4', date: '2026-08-09', merchant: 'MYSTERY SHOP 12', amountMYR: 8.5, category: 'Uncategorized', source: 'statement' }
   ],
   recent: [
     { id: 'r1', date: '2026-08-18', merchant: 'BIG Pharmacy', amountMYR: 22.9, category: 'Health', source: 'applepay' },
@@ -90,6 +97,16 @@ const DEMO = {
     { id: 'r5', date: '2026-08-05', merchant: 'YES phone bill', amountMYR: 50, category: 'Phone & Internet', source: 'manual' }
   ]
 };
+
+// Demo stand-in for the backend's search_rows: invented rows from earlier months.
+const DEMO_OLDER = [
+  { id: 'o1', date: '2026-07-19', merchant: 'Village Grocer', amountMYR: 186.4, category: 'Groceries', source: 'applepay', fronted: null },
+  { id: 'o2', date: '2026-07-12', merchant: 'Shell Kota Damansara', amountMYR: 95, category: 'Fuel', source: 'applepay', fronted: null },
+  { id: 'o3', date: '2026-06-21', merchant: 'Village Grocer', amountMYR: 142.2, category: 'Groceries', source: 'applepay', fronted: null },
+  { id: 'o4', date: '2026-06-03', merchant: 'Starbucks Mid Valley', amountMYR: 17.5, category: 'Food', source: 'tng', fronted: null },
+  { id: 'o5', date: '2026-05-27', merchant: 'KBBQ dinner', amountMYR: 88, category: 'Food', source: 'applepay', fronted: 'Mei' },
+  { id: 'o6', date: '2026-03-14', merchant: 'Uniqlo Mid Valley', amountMYR: 129, category: 'Shopping', source: 'statement', fronted: null }
+];
 
 const fmt = (v) => (v < 0 ? '-' : '') + 'RM' + Math.abs(v).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -114,9 +131,16 @@ function fmtDay(iso) {
 const SOURCE_LABEL = { applepay: 'Apple Pay', tng: 'TnG', statement: 'Statement', manual: 'Quick add', alipay: 'Alipay', grab: 'Grab' };
 const srcLabel = (s) => SOURCE_LABEL[s] || s || '';
 const plural = (n, word, many) => `${n} ${n === 1 ? word : (many || word + 's')}`;
-// Backend/network errors in plain words; a failed POST changed nothing.
+const TIMEOUT_MSG = 'Took too long — check your connection and try again';
+// A change that timed out may still have landed on the backend: never invite a
+// blind retry (a second quick-add would log the spend twice).
+const WRITE_TIMEOUT_MSG = 'Took too long — it may still have gone through. Refresh before trying again.';
+// Backend/network errors in plain words; a failed POST changed nothing (a timed-out
+// one may have landed — the next refresh shows the truth).
 function friendly(err) {
   const m = String((err && err.message) || err || '');
+  if (m === WRITE_TIMEOUT_MSG) return m;
+  if ((err && err.name === 'AbortError') || m === TIMEOUT_MSG) return TIMEOUT_MSG;
   if (/failed to fetch|networkerror|load failed|network/i.test(m)) return 'No connection — nothing changed. Try again.';
   if (/unexpected token|json/i.test(m)) return 'The server didn’t answer properly — try again in a minute.';
   return m;
@@ -152,7 +176,7 @@ const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 
 // action {label, run}: an inline button (e.g. Undo) — the toast then stays 6s
 // and takes taps; plain toasts never block what's underneath.
-function toast(msg, action) {
+function toast(msg, action, action2) {
   const t = $('toast');
   t.textContent = '';
   const span = document.createElement('span');
@@ -163,14 +187,19 @@ function toast(msg, action) {
     t.style.transform = 'translateX(-50%) translateY(8px)';
     t.style.pointerEvents = 'none';
   };
-  if (action) {
+  [action, action2].forEach((a) => {
+    if (!a) return;
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'toast-act';
-    b.textContent = action.label;
-    b.addEventListener('click', () => { clearTimeout(t._h); hide(); action.run(); });
+    b.textContent = a.label;
+    b.addEventListener('click', () => { clearTimeout(t._h); hide(); a.run(); });
     t.appendChild(b);
-  }
+  });
+  // Two actions (Undo + a follow-up offer) wrap onto a second line inside a softer pill.
+  t.style.flexWrap = action2 ? 'wrap' : '';
+  t.style.borderRadius = action2 ? '22px' : '';
+  t.style.justifyContent = action2 ? 'center' : '';
   t.style.pointerEvents = action ? 'auto' : 'none';
   // Reaching Undo by VoiceOver/keyboard stops the clock; leaving restarts it.
   t.onfocusin = () => clearTimeout(t._h);
@@ -212,32 +241,38 @@ function parseConnect(s) {
 
 function isDemo() { return !!new URLSearchParams(location.search).get('demo'); }
 
+// Every request goes through here so none can spin forever: abort after `ms`
+// (the abort also covers reading the body) and say so in plain words.
+const REQ_TIMEOUT_MS = 30000;
+async function fetchJson(url, opts, ms) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), ms || REQ_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { ...opts, signal: ctl.signal });
+    return await res.json();
+  } catch (err) {
+    if (err && err.name === 'AbortError') throw new Error(TIMEOUT_MSG);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchData() {
   if (new URLSearchParams(location.search).get('demo')) return DEMO;
-  const res = await fetch(cfg.url + '?view=data&key=' + encodeURIComponent(cfg.key));
-  const j = await res.json();
+  const j = await fetchJson(cfg.url + '?view=data&key=' + encodeURIComponent(cfg.key), {}, REQ_TIMEOUT_MS);
   if (!j.ok) throw new Error('Backend refused the key');
   return j;
 }
 
 async function quickAdd(fields) {
   if (new URLSearchParams(location.search).get('demo')) return { ok: true, id: 'demo' };
-  const res = await fetch(cfg.url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // simple request: no CORS preflight
-    body: JSON.stringify({ action: 'quickadd', key: cfg.key, ...fields })
-  });
-  return res.json();
+  return postJson({ action: 'quickadd', ...fields });
 }
 
 async function undoQuickAdd(id) {
   if (new URLSearchParams(location.search).get('demo')) return { ok: true };
-  const res = await fetch(cfg.url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ action: 'undo_quickadd', key: cfg.key, id })
-  });
-  return res.json();
+  return postJson({ action: 'undo_quickadd', id });
 }
 
 // Last quick-add, kept for the 15-minute undo window the backend enforces.
@@ -257,14 +292,50 @@ function clearLastAdd() {
   try { localStorage.removeItem(UNDO_KEY); } catch (e) { /* ignore */ }
 }
 
-async function categorize(id, category) {
-  if (new URLSearchParams(location.search).get('demo')) return { ok: true };
-  const res = await fetch(cfg.url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // simple request: no CORS preflight
-    body: JSON.stringify({ action: 'categorize', key: cfg.key, id, category })
-  });
-  return res.json();
+// Demo-only memory of the rule each categorised row offered (add_rule_app only
+// gets an id) and of the rules "added" so far.
+const demoRuleOffers = {};
+const demoRules = new Set();
+// `row` is only for the demo stub, which derives a ruleKeyword from the merchant
+// the way backend v48 would for a merchant no keyword rule knows.
+async function categorize(id, category, row) {
+  if (isDemo()) {
+    const r = { ok: true };
+    if (row && NOT_PICKABLE[row.category]) {
+      // Same shape the backend derives: lower-case, letters only, words of 3+, first two.
+      const kw = String(row.merchant || '').toLowerCase().split(/[^a-z]+/).filter((w) => w.length >= 3).slice(0, 2).join(' ');
+      if (kw.length >= 3 && !demoRules.has(kw)) { r.ruleKeyword = kw; demoRuleOffers[id] = { keyword: kw, category }; }
+    }
+    return r;
+  }
+  return postJson({ action: 'categorize', id, category });
+}
+
+// Backend v48 add_rule_app: files the keyword the categorize answer named. The
+// app never sends a keyword itself.
+async function addRule(id) {
+  if (isDemo()) {
+    const o = demoRuleOffers[id];
+    if (!o) return { ok: false, error: 'a rule already covers this merchant' };
+    demoRules.add(o.keyword);
+    delete demoRuleOffers[id];
+    return { ok: true, keyword: o.keyword, category: o.category };
+  }
+  return postJson({ action: 'add_rule_app', id });
+}
+
+// Backend v48 search_rows (snapshot `searchMonths` says it exists): newest first, max 50.
+async function searchRows(q) {
+  if (isDemo()) {
+    await new Promise((r) => setTimeout(r, 350));
+    const needle = q.toLowerCase();
+    const hit = (t) => String(t.merchant || '').toLowerCase().includes(needle) || String(t.category || '').toLowerCase().includes(needle);
+    const rows = [...(data.monthRows || []), ...(data.recent || []), ...DEMO_OLDER].filter(hit)
+      .filter((t, i, a) => a.findIndex((x) => x.id === t.id) === i)
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    return { ok: true, rows: rows.slice(0, 50), more: rows.length > 50, months: data.searchMonths };
+  }
+  return postJson({ action: 'search_rows', q }, undefined, true);
 }
 
 // Bars and the budget ring render at zero and sweep to their real value on the
@@ -412,6 +483,51 @@ function renderSkeleton() {
     card(4) + card(3) + card(2);
 }
 
+// "Today" for the hero lines comes from the snapshot itself (generatedAt, written
+// by the backend in the sheet's own clock, the same one that set dayOfMonth), never
+// the phone's clock, so demo mode and a phone in another timezone agree with the
+// figures. `month` is a label ("August 2026") and dayOfMonth alone has no month, so
+// generatedAt's date is the one complete, unambiguous source.
+function snapToday() {
+  const m = String((data && data.generatedAt) || '').match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : null;
+}
+function isoDayNum(iso) {
+  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) / 86400e3 : NaN;
+}
+// TnG and HSBC are the channels whose lag makes the budget figures optimistic.
+// Returns the line's text, or null when both are fresh / unknown.
+function staleCaptureText() {
+  const today = snapToday();
+  if (!today || !data.coverage) return null;
+  const stale = [['tng', 'TnG'], ['hsbc', 'HSBC']]
+    .map(([k, label]) => ({ label, gap: isoDayNum(today) - isoDayNum(data.coverage[k]) }))
+    .filter((x) => x.gap > 7);
+  if (!stale.length) return null;
+  const tail = ' — the real figure may be lower';
+  if (stale.length === 1) return `${stale[0].label} last synced ${stale[0].gap} days ago${tail}`;
+  return `${stale.map((x) => x.label).join(' and ')} last synced ${Math.max(...stale.map((x) => x.gap))}+ days ago${tail}`;
+}
+// Today's spend so far from monthRows: positive amounts dated snapToday(), minus
+// the non-spend categories. `budgeted` = the part landing in budgeted envelopes
+// (the only part the hero's per-day figure has already absorbed). null = unknown.
+const NON_SPEND_CATS = { REFUND: 1, TRANSFER: 1, 'DUPLICATE?': 1, REVIEW: 1 };
+function todaySpend() {
+  const today = snapToday();
+  if (!today || !Array.isArray(data.monthRows)) return null;
+  const budgets = data.budgets || {};
+  let any = false, spent = 0, budgeted = 0;
+  data.monthRows.forEach((t) => {
+    if (t.date !== today) return;
+    any = true;
+    if (!(t.amountMYR > 0) || NON_SPEND_CATS[t.category]) return;
+    spent += t.amountMYR;
+    if (Object.prototype.hasOwnProperty.call(budgets, t.category)) budgeted += t.amountMYR;
+  });
+  return { any, spent: Math.round(spent * 100) / 100, budgeted: Math.round(budgeted * 100) / 100 };
+}
+
 function renderOverview() {
   const budgets = data.budgets || {};
   const byCat = data.byCat || {};
@@ -423,18 +539,35 @@ function renderOverview() {
   // the caps mirror Actual's real capacity. Monthly spend drops to a sub-line.
   // An overspent envelope counts AGAINST the rest (29 Sep 2026, user decision):
   // covering it at the sitting takes money from the others, so the hero must too.
-  let left = 0;
+  let rawLeft = 0;
   let overTotal = 0;
   bCats.forEach((c) => {
     const d = budgets[c] - (byCat[c] || 0);
-    left += d;
+    rawLeft += d;
     if (d < -0.005) overTotal -= d;
   });
-  left = Math.max(0, left);
+  const left = Math.max(0, rawLeft);
   const daysLeft = Math.max(1, data.daysInMonth - data.dayOfMonth + 1);
   const perDay = left / daysLeft;
+  // Today line. The hero's daily figure is computed AFTER today's spends, so it is
+  // never compared to them directly: when today touched budgeted envelopes, say
+  // what the day STARTED at, by undoing those spends with the hero's own sum
+  // (unclamped sum + today's budgeted spend, floored at 0 exactly as the hero floors).
+  // Today in a non-budgeted category leaves the figure untouched, so then just the spend.
+  const tdy = todaySpend();
+  let todayText = '';
+  if (tdy) {
+    if (!tdy.any) todayText = 'Nothing logged today yet';
+    else if (bCats.length && tdy.budgeted > 0.005) {
+      todayText = `Today ${fmt(tdy.spent)} &middot; started the day at ${fmt(Math.max(0, rawLeft + tdy.budgeted) / daysLeft)}`;
+    } else todayText = `Today ${fmt(tdy.spent)} spent`;
+  }
+  const todayLine = todayText ? `<div class="muted" style="font-size:13px;margin-top:3px">${todayText}</div>` : '';
+  const stale = staleCaptureText();
+  const staleLine = stale ? `<div class="flag" id="staleFlag" role="button" tabindex="0" aria-label="${esc(stale + '. Open More to import')}">${esc(stale)} &rsaquo;</div>` : '';
   const heroLabel = `${fmt(perDay)} a day safe to spend. ${fmt(left)} left for ${plural(daysLeft, 'day')} including today.` +
-    (overTotal > 0.005 ? ` ${fmt(overTotal)} over in some envelopes.` : '');
+    (overTotal > 0.005 ? ` ${fmt(overTotal)} over in some envelopes.` : '') +
+    (todayText ? ' ' + todayText.replace(/&middot;/g, '.') + '.' : '');
   let html = bCats.length
     ? `<div role="group" aria-label="${esc(heroLabel)}"><div aria-hidden="true">
       <div style="margin-top:6px;display:flex;align-items:baseline;gap:8px">
@@ -442,11 +575,12 @@ function renderOverview() {
         <div class="muted" style="font-size:17px;font-weight:600">/ day</div></div>
       <div style="font-size:15px;font-weight:600;margin-top:1px">safe to spend</div>
       <div class="muted" style="font-size:13px;margin-top:3px">${fmt(left)} left &middot; ${daysLeft} day${daysLeft === 1 ? '' : 's'} incl. today &middot; ${fmt(data.totalMYR)} spent this month</div>
+      ${todayLine}
       ${overTotal > 0.005 ? `<div style="font-size:13px;margin-top:3px;color:var(--red)">${left <= 0.005
         ? `envelopes are ${fmt(overTotal)} over in total &mdash; the sitting covers it from Buffer`
-        : `already ${fmt(overTotal)} lower for overspent envelopes`}</div>` : ''}</div></div>`
+        : `already ${fmt(overTotal)} lower for overspent envelopes`}</div>` : ''}</div></div>${staleLine}`
     : `<div id="bigTotal" style="font-size:44px;font-weight:800;letter-spacing:-1px;margin-top:6px">${fmt(data.totalMYR)}</div>
-      <div class="muted" style="font-size:13px;margin-top:2px">spent this month &middot; day ${data.dayOfMonth} of ${data.daysInMonth}</div>`;
+      <div class="muted" style="font-size:13px;margin-top:2px">spent this month &middot; day ${data.dayOfMonth} of ${data.daysInMonth}</div>${todayLine}${staleLine}`;
 
   const undo = pendingUndo();
   if (undo) {
@@ -542,7 +676,8 @@ function renderOverview() {
     b.addEventListener('click', () => { dropActualTodo(Number(b.dataset.todo)); renderOverview(); });
   });
   view.querySelectorAll('.txn[data-recap]').forEach((el) => el.addEventListener('click', openRecapSheet));
-
+  const staleFlag = $('staleFlag');
+  if (staleFlag) staleFlag.addEventListener('click', () => setTab('more')); // the import card is the first thing there
 
   const undoBtn = $('undoBtn');
   if (undoBtn) {
@@ -595,10 +730,49 @@ function dropActualTodo(i) {
 // Search over this month's rows (+ Recent, which can reach into last month):
 // case-insensitive merchant/category substring, or an amount that starts with
 // the typed digits. Results are the same tappable rows as everywhere else.
+// Beyond this month (backend v48 search_rows, snapshot `searchMonths`): the
+// server's rows replace the local list until the box is typed in again.
+// searchSeq works like refreshSeq: typing bumps it, so a slow answer for an
+// older query is dropped. searchRemote/searchPending live outside renderMore so
+// a refresh's re-render keeps the busy state and the results.
+let searchSeq = 0;
+let searchRemote = null;  // { q (lower-case trimmed), rows, more, months }
+let searchPending = null; // q while a server search is in flight
+function renderRemoteSearch(out) {
+  const r = searchRemote;
+  const month = snapToday() ? snapToday().slice(0, 7) : '';
+  out.innerHTML = r.rows.length
+    ? r.rows.map((t, i) => txnRow(t, 'data-sr="' + i + '"', String(t.date || '').slice(0, 7) !== month)).join('') +
+      (r.more ? '<div class="muted" style="font-size:12px;margin-top:6px">First 50 shown — narrow it down.</div>' : '')
+    : `<div class="muted" style="font-size:13px;padding:12px 0 2px">No match in the last ${esc(r.months)} months.</div>`;
+  out.querySelectorAll('.txn[data-sr]').forEach((el) => {
+    el.addEventListener('click', () => openRowSheet(r.rows[Number(el.dataset.sr)]));
+  });
+}
+async function searchDeep(raw) {
+  const q = raw.trim().toLowerCase();
+  const my = ++searchSeq;
+  searchPending = q;
+  renderSearch(raw);
+  try {
+    const r = await searchRows(raw.trim());
+    if (my !== searchSeq) return; // typed again meanwhile
+    if (!r.ok) throw new Error(r.error === 'unauthorized' ? 'Searching older months needs the newer backend — not live yet' : (r.error || 'rejected'));
+    searchRemote = { q, rows: Array.isArray(r.rows) ? r.rows : [], more: !!r.more, months: r.months || data.searchMonths };
+  } catch (err) {
+    if (my !== searchSeq) return;
+    toast('Failed: ' + friendly(err));
+  }
+  searchPending = null;
+  if ($('searchBox')) renderSearch($('searchBox').value);
+}
+
 function renderSearch(q) {
   const out = $('searchOut');
-  q = String(q || '').trim().toLowerCase();
+  const raw = String(q || '');
+  q = raw.trim().toLowerCase();
   if (q.length < 2) { out.innerHTML = ''; return; }
+  if (searchRemote && searchRemote.q === q) { renderRemoteSearch(out); return; }
   const seen = new Set();
   const pool = [...(data.monthRows || []), ...(data.recent || [])].filter((t) => {
     if (seen.has(t.id)) return false;
@@ -610,16 +784,23 @@ function renderSearch(q) {
   out.innerHTML = pool.length
     ? pool.map((t, i) => txnRow(t, 'data-si="' + i + '"')).join('') + (pool.length === 30 ? '<div class="muted" style="font-size:12px;margin-top:6px">First 30 shown — narrow it down.</div>' : '')
     : '<div class="muted" style="font-size:13px;padding:12px 0 2px">No match this month.</div>';
+  if (data.searchMonths) {
+    out.innerHTML += searchPending === q
+      ? '<button type="button" class="linkbtn" disabled aria-busy="true">Searching&hellip;</button>'
+      : `<button type="button" class="linkbtn" id="searchDeep">Search the last ${esc(data.searchMonths)} months &rsaquo;</button>`;
+  }
   out.querySelectorAll('.txn[data-si]').forEach((el) => {
     el.addEventListener('click', () => openRowSheet(pool[Number(el.dataset.si)]));
   });
+  const deep = out.querySelector('#searchDeep');
+  if (deep) deep.addEventListener('click', () => searchDeep(raw));
 }
 
 // One tappable transaction line (Recent, drill-down). A 🏷 marks a fronted tag.
-function txnRow(t, attr) {
+function txnRow(t, attr, longDate) {
   const inflow = t.amountMYR !== null && t.amountMYR < 0;
   return `<div class="txn tappable" role="button" tabindex="0" ${attr}>${catIcon(t.category)}<div style="min-width:0;flex:1"><div class="m">${esc(t.merchant || '(no merchant)')}</div>
-    <div class="sub">${esc(fmtDay(t.date))} &middot; ${esc(t.category)}${t.fronted ? ` &middot; <span style="color:var(--yellow)">fronted: ${esc(t.fronted)}</span>` : ''}</div></div>
+    <div class="sub">${esc(longDate ? fmtCoverageDate(t.date) : fmtDay(t.date))} &middot; ${esc(t.category)}${t.fronted ? ` &middot; <span style="color:var(--yellow)">fronted: ${esc(t.fronted)}</span>` : ''}</div></div>
     <div class="val${inflow ? ' in' : ''}">${t.amountMYR === null ? '—' : (inflow ? '+' + fmt(-t.amountMYR) : fmt(t.amountMYR))}</div><span class="chev" aria-hidden="true">&rsaquo;</span></div>`;
 }
 
@@ -817,24 +998,14 @@ function openCategorySheet(cat) {
 
 async function setFronted(id, name) {
   if (isDemo()) return { ok: true };
-  const res = await fetch(cfg.url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ action: 'set_fronted', key: cfg.key, id, name })
-  });
-  return res.json();
+  return postJson({ action: 'set_fronted', id, name });
 }
 
 // One row: shows it and lets you tag who you fronted it for (any row — card taps
 // included, which the Add tab's note can't reach). Only the tag changes backend-side.
 async function editQuickAdd(id, fields) {
   if (isDemo()) return { ok: true };
-  const res = await fetch(cfg.url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ action: 'edit_quickadd', key: cfg.key, id, ...fields })
-  });
-  return res.json();
+  return postJson({ action: 'edit_quickadd', id, ...fields });
 }
 
 async function removeImported(id) {
@@ -940,13 +1111,39 @@ function fixAmountSheet(t, after) {
   });
 }
 
+// "Always put this merchant here?" (backend v48): a single-row categorise whose
+// answer carried `ruleKeyword` adds a second toast action next to Undo.
+function ruleOffer(t, keyword, cat) {
+  if (!keyword) return null;
+  return { label: `Always ${keyword} → ${cat}?`, run: () => offerRule(t, keyword, cat) };
+}
+async function offerRule(t, keyword, cat) {
+  const yes = await confirmSheet(`Always put &ldquo;${esc(keyword)}&rdquo; in ${esc(cat)}?`,
+    `Every future transaction whose name contains <b>${esc(keyword)}</b> will be filed under ${esc(cat)} automatically. Rules are edited in the sheet&rsquo;s Rules tab.`,
+    'Add rule', null, true);
+  if (!yes) return;
+  try {
+    const r = await addRule(t.id);
+    if (!r.ok) throw new Error(r.error === 'unauthorized' ? 'Rules from the app need the newer backend — not live yet' : (r.error || 'rejected'));
+    const kw = r.keyword || keyword;
+    const c = r.category || cat;
+    // Rows still waiting in Review that the new rule would have caught: offer the
+    // existing batch path (so its Undo applies).
+    const more = (data.review || []).filter((x) => !inFlightIds.has(x.id) && String(x.merchant || '').toLowerCase().includes(String(kw).toLowerCase()));
+    toast(`Rule added: ${kw} → ${c}`, more.length ? { label: `Move ${more.length} more`, run: () => applyCategory(more, c) } : null);
+  } catch (err) {
+    toast('Failed: ' + friendly(err));
+  }
+}
+
 // Change any row's category from its sheet (not just Review rows), with the
 // same Undo. The bridge propagates category changes to Actual on its next run.
 async function recategorize(t, cat) {
   const was = t.category;
   try {
-    const r = await categorize(t.id, cat);
+    const r = await categorize(t.id, cat, t);
     if (!r.ok) throw new Error(r.error || 'rejected');
+    const ruleKeyword = r.ruleKeyword;
     t.category = cat;
     if (data.review) {
       const before = data.review.length;
@@ -963,7 +1160,7 @@ async function recategorize(t, cat) {
         toast('Undone — back to ' + (was || 'Uncategorized'));
       } catch (err) { toast('Undo failed: ' + friendly(err)); }
       refresh();
-    } });
+    } }, ruleOffer(t, ruleKeyword, cat));
     refresh();
   } catch (err) {
     toast('Failed: ' + friendly(err));
@@ -1106,13 +1303,20 @@ function runAudit() {
 
 // More tab (27 Sep 2026): the monthly/occasional cards, off the daily Overview —
 // search, the month-end balance check, and the savings pots.
+// Order (Oct 2026 tidy): recap, spending by month, Emergency Fund, Buffer; then the
+// tools (search, coverage, balance check); then one folded Settings row.
+// Each card below is built into its own variable and assembled at the end.
+let moreFoldOpen = false; // the Settings disclosure's state survives re-renders
 function renderMore() {
   let html = '';
+  let covHtml = '';
+  let searchHtml = '';
+  let auditHtml = '';
   // Capture coverage: how far each statement channel is imported ("synced until").
   // Older backends don't send `coverage` — hide the card entirely then.
   if (data.coverage) {
     const CHANNELS = [['tng', 'TNG eWallet'], ['hsbc', 'HSBC'], ['rhb', 'RHB Card'], ['alipay', 'Alipay']];
-    html += `<div class="card"><h3>Statements synced until</h3><div style="margin-top:4px">` +
+    covHtml = `<div class="card"><h3>Statements synced until</h3><div style="margin-top:4px">` +
       CHANNELS.map(([k, label]) => {
         const d = data.coverage[k];
         return `<div class="txn"><div class="m">${label}</div>
@@ -1121,8 +1325,9 @@ function renderMore() {
       `</div><div class="muted" style="font-size:12px;margin-top:8px">Newest imported transaction per source &mdash; spends after these dates arrive with your next screenshot/statement drop.</div></div>`;
   }
 
-  html += `<div class="card"><h3>Search this month</h3>
-    <div><input type="search" id="searchBox" aria-label="Search this month" placeholder="Merchant or amount, e.g. ikea or 117" autocomplete="off" style="background:var(--fill)"></div>
+  const searchTitle = data.searchMonths ? 'Search' : 'Search this month';
+  searchHtml = `<div class="card"><h3>${searchTitle}</h3>
+    <div><input type="search" id="searchBox" aria-label="${searchTitle}" placeholder="Merchant or amount, e.g. ikea or 117" autocomplete="off" style="background:var(--fill)"></div>
     <div id="searchOut"></div></div>`;
   if (data.recap) html += recapEntryHtml();
   const monthChartItems = monthTotalItems();
@@ -1168,7 +1373,7 @@ function renderMore() {
     // say so BEFORE the check, not after the verdict.
     const pending = data.reviewTotal
       ? `<div class="flag" style="display:block;margin:0 0 10px">${plural(data.reviewTotal, 'row')} still in Review aren&rsquo;t in Actual yet &mdash; categorise them first or the check will show a false gap.</div>` : '';
-    html += `<div class="card"><h3>Balance check</h3>${pending}
+    auditHtml = `<div class="card"><h3>Balance check</h3>${pending}
       <div class="muted" style="font-size:13px">Your real balances right now, from each app.</div>
       <div style="display:flex;gap:10px;margin-top:10px">
         <input type="text" inputmode="decimal" id="auditRhb" aria-label="RHB balance" placeholder="RHB" autocomplete="off" style="flex:1;background:var(--fill)">
@@ -1177,27 +1382,50 @@ function renderMore() {
       <div id="auditOut"></div></div>`;
   }
 
-  html += `<div class="card"><h3>Quick add opens as</h3>
-    <div class="seg" style="margin-top:12px" role="group" aria-label="Quick add style">
+  html += searchHtml + covHtml + auditHtml;
+  html += `<details class="card fold" id="moreFold"${moreFoldOpen ? ' open' : ''}><summary>Settings and how it works</summary>
+    <div class="muted" style="font-size:13px;margin-top:14px">Quick add opens as</div>
+    <div class="seg" style="margin-top:8px" role="group" aria-label="Quick add style">
       <button type="button" id="styleSheet" aria-pressed="${addAsSheet()}">Sheet over the screen</button>
       <button type="button" id="styleTab" aria-pressed="${!addAsSheet()}">Its own tab</button></div>
-    <div class="muted" style="font-size:12px;margin-top:8px">Sheet: the keypad comes up at once and the screen behind stays put. Switch back here any time.</div></div>`;
-  html += `<div class="card"><h3>How the numbers work</h3><ul class="muted" style="font-size:13px;line-height:1.55;margin:4px 0 0;padding-left:18px">
+    <div class="muted" style="font-size:12px;margin-top:8px">Sheet: the keypad comes up at once and the screen behind stays put. Switch back here any time.</div>
+    <div class="muted" style="font-size:13px;margin-top:18px">How the numbers work</div>
+    <ul class="muted" style="font-size:13px;line-height:1.55;margin:6px 0 0;padding-left:18px">
     <li><b style="color:var(--text)">Safe to spend</b> &mdash; what&rsquo;s left across every budgeted envelope, divided by the days left this month (today included). An overspent envelope counts against the others.</li>
     <li><b style="color:var(--text)">Pace tick</b> &mdash; the small mark on a bar is where this month is heading; &ldquo;heading RM20 over&rdquo; means that projection passes the cap.</li>
     <li><b style="color:var(--text)">The rules</b> &mdash; keyword rules in the sheet&rsquo;s Rules tab pick a category from the merchant name; anything they miss waits in Review.</li>
-    <li><b style="color:var(--text)">Buffer floor</b> &mdash; the cushion for one-off shocks (the worst single month seen); salary above plan refills it before anything else.</li></ul></div>`;
+    <li><b style="color:var(--text)">Buffer floor</b> &mdash; the cushion for one-off shocks (the worst single month seen); salary above plan refills it before anything else.</li></ul></details>`;
   html += `<div class="muted" style="text-align:center;margin-top:20px;font-size:12px">Updated ${esc(fmtUpdated(data.generatedAt))}</div>`;
   // Only the data cards re-render; the static import card above keeps its
   // chosen files and the last import's review list across refreshes.
   const view = $('more-dyn');
-  const q = $('searchBox') ? $('searchBox').value : '';
+  // A refresh re-renders everything here, and it fires exactly when the user comes
+  // back from a bank app with a balance to type: carry the typed text, a showing
+  // verdict and the focus/caret across the re-render.
+  const KEEP = ['searchBox', 'auditRhb', 'auditTng'];
+  const kept = {};
+  KEEP.forEach((id) => { if ($(id)) kept[id] = $(id).value; });
+  const q = kept.searchBox || '';
+  const verdictShowing = !!($('auditOut') && $('auditOut').innerHTML.trim());
+  const ae = document.activeElement;
+  const focused = ae && KEEP.includes(ae.id) && view.contains(ae)
+    ? { id: ae.id, start: ae.selectionStart, end: ae.selectionEnd } : null;
   view.innerHTML = html;
+  KEEP.forEach((id) => { if ($(id) && kept[id] !== undefined) $(id).value = kept[id]; });
   animateFills('more-dyn');
   wireColChart(view, 'monthChart', monthChartItems);
   view.querySelectorAll('.txn[data-recap]').forEach((el) => el.addEventListener('click', openRecapSheet));
   const auditBtn = $('auditBtn');
-  if (auditBtn) auditBtn.addEventListener('click', runAudit);
+  if (auditBtn) {
+    auditBtn.addEventListener('click', runAudit);
+    // Re-run so the verdict reflects the fresh snapshot — but only while both
+    // fields still hold valid numbers (no stray "type a number" toast on a refresh).
+    const rhbOk = amountValue($('auditRhb').value) >= 0;
+    const tngOk = !$('auditTng').value.trim() || amountValue($('auditTng').value) >= 0;
+    if (verdictShowing && rhbOk && tngOk) runAudit();
+  }
+  const fold = $('moreFold');
+  if (fold) fold.addEventListener('toggle', () => { moreFoldOpen = fold.open; });
   [['styleSheet', 'sheet'], ['styleTab', 'tab']].forEach(([id, v]) => $(id).addEventListener('click', () => {
     setAddStyle(v);
     $('styleSheet').setAttribute('aria-pressed', String(v === 'sheet'));
@@ -1207,8 +1435,18 @@ function renderMore() {
   const searchBox = $('searchBox');
   if (searchBox) {
     searchBox.value = q;
-    searchBox.addEventListener('input', () => renderSearch(searchBox.value));
+    searchBox.addEventListener('input', () => {
+      searchSeq++; // any answer still on its way is for an older query
+      searchRemote = null;
+      searchPending = null;
+      renderSearch(searchBox.value);
+    });
     if (q) renderSearch(q);
+  }
+  if (focused && $(focused.id)) {
+    const el = $(focused.id);
+    el.focus({ preventScroll: true });
+    try { if (focused.start !== null && focused.start !== undefined) el.setSelectionRange(focused.start, focused.end); } catch (e) { /* type=search can refuse */ }
   }
 }
 
@@ -1317,11 +1555,13 @@ async function applyCategory(txns, cat) {
   updateBadge();
   const done = [];
   let lastErr = null;
+  let ruleKeyword = null;
   const failed = [];
   for (const txn of txns) { // sequential: each categorize takes the backend lock
     try {
-      const r = await categorize(txn.id, cat);
+      const r = await categorize(txn.id, cat, txn);
       if (!r.ok) throw new Error(r.error || 'rejected');
+      if (!many) ruleKeyword = r.ruleKeyword || null; // the rule offer is for a single row only
       done.push(txn);
     } catch (err) {
       lastErr = err;
@@ -1338,7 +1578,7 @@ async function applyCategory(txns, cat) {
   // Undo (10s, paused while focused): put each row back to the category it had (Uncategorized/REVIEW).
   const undo = done.length ? { label: 'Undo', run: () => undoCategory(done) } : null;
   if (lastErr) toast(`${done.length}/${txns.length} → ${cat} · last error: ${friendly(lastErr)}`, undo);
-  else toast(many ? `${done.length} transactions → ${cat}` : `${txns[0].merchant || 'Row'} → ${cat}`, undo);
+  else toast(many ? `${done.length} transactions → ${cat}` : `${txns[0].merchant || 'Row'} → ${cat}`, undo, many ? null : ruleOffer(txns[0], ruleKeyword, cat));
   if (done.length) refresh(); // Overview spend + the >100-row review tail catch up
 }
 
@@ -1584,9 +1824,15 @@ function amountValue(s) {
 // Replaces the Drive-app drop + waiting for the 07:00 run.
 const UPLOAD_FOLDERS = [['tng', 'TnG'], ['hsbc', 'HSBC'], ['rhb', 'RHB Card'], ['rhbxfer', 'RHB Transfers'], ['alipay', 'Alipay']];
 
-async function postJson(payload) {
-  const res = await fetch(cfg.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ key: cfg.key, ...payload }) });
-  return res.json();
+// The one POST helper (text/plain = a simple request, no CORS preflight). Slow
+// actions get longer leashes: a screenshot upload 90s, the OCR pass 4 minutes.
+async function postJson(payload, timeoutMs, readOnly) {
+  try {
+    return await fetchJson(cfg.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ key: cfg.key, ...payload }) }, timeoutMs);
+  } catch (err) {
+    if (!readOnly && err && err.message === TIMEOUT_MSG) throw new Error(WRITE_TIMEOUT_MSG);
+    throw err;
+  }
 }
 
 function fileToBase64(file) {
@@ -1614,7 +1860,7 @@ async function uploadAndProcess() {
     for (let i = 0; i < files.length; i++) {
       status.textContent = `Uploading ${i + 1} of ${files.length}…`;
       if (files[i].size > 8 * 1024 * 1024) throw new Error(files[i].name + ' is over 8MB');
-      const r = isDemo() ? { ok: true } : await postJson({ action: 'upload_screenshot', folder, name: files[i].name, mime: files[i].type, data: await fileToBase64(files[i]) });
+      const r = isDemo() ? { ok: true } : await postJson({ action: 'upload_screenshot', folder, name: files[i].name, mime: files[i].type, data: await fileToBase64(files[i]) }, 90000);
       if (!r.ok) throw new Error(r.error || 'upload rejected');
     }
     status.textContent = 'Processing (OCR + reconcile) — this can take a minute…';
@@ -1622,7 +1868,7 @@ async function uploadAndProcess() {
       ? { ok: true, summary: { processed: ['Screenshot (statement): demo.png'], matched: 5, added: 3, refunds: 1, unsupported: [], unparsed: 1, transferCheck: null,
           files: [{ name: 'IMG_2041.PNG', label: 'HSBC', found: 6, already: 4, added: 2, ignored: 0, repeated: 0, unreadable: 0, missedAmounts: 0, unaccounted: 0, ok: true },
             { name: 'IMG_2042.PNG', label: 'HSBC', found: 3, already: 1, added: 1, ignored: 1, repeated: 0, unreadable: 1, missedAmounts: 1, unaccounted: 0, ok: false }] } }
-      : await postJson({ action: 'process_inbox_app' });
+      : await postJson({ action: 'process_inbox_app' }, 240000);
     if (isDemo()) p.summary.addedRows = [
       { id: 'x1', date: '2026-08-18', merchant: 'SUBWAY-PETRONAS TTDI', amountMYR: 1300, category: 'Food', source: 'statement', createdMs: Date.now(), unusual: true, usualMax: 18.9 },
       { id: 'x2', date: '2026-08-18', merchant: 'AEON CO-BANDAR PUCHON', amountMYR: 23.7, category: 'Groceries', source: 'statement', createdMs: Date.now() },
@@ -1993,4 +2239,12 @@ function boot() {
   refresh();
 }
 
-boot();
+if (typeof document !== 'undefined') boot();
+
+// Test hook: lets Node require() the pure helpers (see test/app.test.js). No effect in the browser.
+if (typeof module !== 'undefined') module.exports = {
+  fmt, amountValue, fmtDay, fmtCoverageDate, plural, esc, isoDayNum, friendly, TIMEOUT_MSG, WRITE_TIMEOUT_MSG,
+  parseConnect, snapToday, staleCaptureText, todaySpend, paceColor, barColor, amountFlag, importFlag, flippable,
+  monthItems, monthTotalItems, versusPrev, suggestCategory, topCats, canonCats, pickableCats, srcLabel, fmtUpdated,
+  CANON_CATS, __setData: (d) => { data = d; }
+};

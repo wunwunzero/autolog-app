@@ -157,6 +157,15 @@
   .seg button[aria-pressed="true"] { background: var(--seg-thumb); box-shadow: 0 1px 4px rgba(0,0,0,.18); }
   .seg button { min-height: 44px; }
   #addAmount { font-size: 22px; font-weight: 700; font-family: ui-rounded, 'SF Pro Rounded', -apple-system, system-ui, sans-serif; }
+  /* More tab: one folded "Settings and how it works" card (native details). */
+  details.fold { margin-top: 16px; padding-top: 6px; padding-bottom: 6px; }
+  details.fold summary { list-style: none; display: flex; justify-content: space-between; align-items: center; min-height: 44px;
+    font-size: 15px; font-weight: 500; cursor: pointer; }
+  details.fold summary::-webkit-details-marker { display: none; }
+  details.fold summary::after { content: '\203A'; color: var(--muted); font-size: 22px; line-height: 1; transition: transform .2s; }
+  details.fold[open] summary::after { transform: rotate(90deg); }
+  details.fold[open] { padding-bottom: 15px; }
+  @media (prefers-reduced-motion: reduce) { details.fold summary::after { transition: none; } }
   details.help { margin-top: 18px; font-size: 13px; color: var(--muted); }
   details.help summary { text-align: center; color: var(--blue); font-weight: 600; padding: 12px 0; list-style: none; }
   details.help summary::-webkit-details-marker { display: none; }
@@ -329,6 +338,6 @@
   <div id="sheet" class="hidden"></div>
   <div id="toast" role="status" aria-live="polite"></div>
   <!-- bump ?v= on every app.js change: Safari/PWA caches are sticky -->
-  <script src="app.js?v=30"></script>
+  <script src="app.js?v=31"></script>
 </body>
 </html>
