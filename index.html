@@ -30,21 +30,23 @@
 <style>
   /* Colour tokens ("the jar" look, v32): a mint palette, dark by default with a
      light override on :root[data-theme="light"] (set by the head script / applyTheme from the Appearance setting). Semantic
-     meaning is stable: --green good, --amber heading over, --red over, --blue
-     link, --accent filled control (text on it is --accent-ink), --badge count
-     badge. The -bar variants are fills; the plain ones are TEXT colours. */
+     meaning is stable, one job per colour (v35): --gold = money (jar water, pot
+     bars, the two "log" buttons), --amber = a warning orange (heading over, stale
+     capture, below the floor), --red over, --green good, --blue link, --accent
+     filled control (text on it is --accent-ink), --badge count badge. The -bar
+     variants are fills; the plain ones are TEXT colours. */
   :root { color-scheme: dark;
     --bg: #0D1411; --text: #E9F2ED; --muted: #A3B8AE; --fill: #2A3A34; --fill2: #34463F;
     --group: #17211D; --card-line: #26352F; --chip-line: #2E4A3F;
     --sheet: #17211D; --nav: #17211D; --nav-shadow: rgba(0,0,0,.5); --hair: #26352F; --input: #17211D; --scrim: rgba(0,0,0,.6);
     --toast: #26352F; --toast-ink: #E9F2ED; --toast-act: #8FD9B8; --skel-a: #1F2D27; --skel-b: #2A3A34; --tick: #E9F2ED;
-    --green: #8FD9B8; --amber: #F0C566; --red: #FF9B8C; --blue: #8FD9B8; --yellow: #F0C566;
+    --green: #8FD9B8; --amber: #F5A965; --red: #FF9B8C; --blue: #8FD9B8;
     --accent: #8FD9B8; --accent-ink: #0D1411; --badge: #FF9B8C; --badge-ink: #2A0A05; --placeholder: #A3B8AE;
     --gold: #EDB63C; --gold-ink: #2A1E00;
-    --bar: #6F9084; --amber-bar: #EDB63C; --red-bar: #E5564A; --savebar: #3FB893; --seg-thumb: #3A4D45;
+    --bar: #6F9084; --amber-bar: #E8893F; --red-bar: #E5564A; --over-track: #3B2220; --seg-thumb: #3A4D45;
     --mint: #163A30; --mint-line: #245244; --mint-in: #1E4539; --mint-ink: #BDEBD5; --mint-text: #B9D3C7; --mint-body: #D6E8DF;
     --hero-ink: #fff; --icon: #8FD9B8; --navon: #1E4539; --mintbtn: #1B2B25; --mintbtn-line: #2E4A3F; --rbtn-line: #26352F;
-    --jar-glass: #0D1411; --jar-text: #E9F2ED;
+    --jar-glass: #1E4539; --jar-text: #E9F2ED;
     --c-gold: #ffd60a;
     --c-orange: #ff9f0a; --c-green: #30d158; --c-blue: #0a84ff; --c-cyan: #64d2ff; --c-pink: #ff375f; --c-purple: #bf5af2;
     --c-indigo: #5e5ce6; --c-gray: #98989d; --c-brown: #ac8e68; --c-mint: #63e6e2; --c-teal: #40c8e0; }
@@ -52,9 +54,9 @@
       --group: #FFFFFF; --card-line: #DFE9E4; --chip-line: #D5E2DB;
       --sheet: #FFFFFF; --nav: #FFFFFF; --nav-shadow: rgba(16,35,29,.12); --hair: #E3ECE7; --input: #FFFFFF; --scrim: rgba(16,35,29,.4);
       --toast: #10231D; --toast-ink: #FFFFFF; --toast-act: #8FD9B8; --skel-a: #E6EEEA; --skel-b: #F3F7F4; --tick: #10231D;
-      --green: #14594A; --amber: #7A5200; --red: #A8261C; --blue: #14594A; --yellow: #7A5200;
+      --green: #14594A; --amber: #8A4600; --red: #A8261C; --blue: #14594A;
       --accent: #14594A; --accent-ink: #FFFFFF; --badge: #A8261C; --badge-ink: #FFFFFF; --placeholder: #55675F;
-      --bar: #7C9A8E; --amber-bar: #D99A1C; --red-bar: #C4382C; --savebar: #1F7A65; --seg-thumb: #FFFFFF;
+      --bar: #7C9A8E; --amber-bar: #D9792B; --red-bar: #C4382C; --over-track: #F6DEDA; --seg-thumb: #FFFFFF;
       --mint: #DCEFE5; --mint-line: #BFDFCF; --mint-in: #F6FBF8; --mint-ink: #0F4A3D; --mint-text: #35584C; --mint-body: #2B4239;
       --hero-ink: #0F4A3D; --icon: #14594A; --navon: #DCEFE5; --mintbtn: #E8F4EE; --mintbtn-line: #BFDFCF; --rbtn-line: #D5E2DB;
       --jar-glass: #FFFFFF; --jar-text: #14594A;
@@ -74,11 +76,14 @@
   .muted { color: var(--muted); }
   /* Cards: the title sits INSIDE the card as a bold heading. */
   .card { background: var(--group); border: 1px solid var(--card-line); border-radius: 24px; padding: 18px; margin-top: 16px; position: relative; }
-  .card h3 { margin: 0 0 14px; font-size: 17px; font-weight: 800; color: var(--text); letter-spacing: 0; text-transform: none;
+  .card h2 { margin: 0 0 14px; font-size: 17px; font-weight: 800; color: var(--text); letter-spacing: 0; text-transform: none;
     display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
-  .card h3 .hnote { font-size: 12px; font-weight: 600; color: var(--muted); text-align: right; }
+  .card h2 .hnote { font-size: 12px; font-weight: 600; color: var(--muted); text-align: right; }
   .card.list { padding: 18px 18px 8px; }
   .caticon { flex: 0 0 auto; border-radius: 12px; display: inline-grid; place-items: center; font-size: 18px; line-height: 1; }
+  /* No category yet: a dashed "empty slot" tile with a "?" (never an emoji). */
+  .caticon.unset { background: var(--fill2); color: var(--text); font-weight: 800; border: 1.5px dashed var(--muted); }
+  .amt-in { color: var(--green); }
   .pill { border-radius: 100px; padding: 4px 11px; font-size: 12px; font-weight: 700; }
   .pill.bad { background: color-mix(in srgb, var(--badge) 16%, transparent); color: var(--red); }
   .pill.good { background: color-mix(in srgb, var(--green) 16%, transparent); color: var(--green); }
@@ -89,16 +94,26 @@
   .barrow .amt { font-size: 15px; font-weight: 700; white-space: nowrap; }
   .track { position: relative; background: var(--fill); border-radius: 4px; height: 8px; margin-top: 8px; overflow: hidden; }
   .track.lg { height: 10px; border-radius: 5px; }
+  /* Budget bars DRAIN (full = untouched). Overspent: an empty track with a faint red tint.
+     Other-spending bars are a different thing (relative to the largest): thinner. */
+  .track.over { background: var(--over-track); }
+  .track.thin { height: 4px; border-radius: 2px; margin-top: 6px; }
   .pace { position: absolute; top: 0; width: 2px; height: 100%; background: var(--tick); opacity: .7; }
   .pacetext { font-size: 12px; font-weight: 600; margin-top: 5px; }
   .barrow.tappable:active { opacity: .6; }
   #sheet .inner.scroll { max-height: 82vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  /* On-screen keyboard (visualViewport, set by syncSheetKeyboard): the sheet sits just above it
+     and never grows taller than what is visible. Without visualViewport none of this applies. */
+  #sheet { padding-bottom: var(--kb, 0px); }
+  #sheet.kb .inner.scroll { max-height: min(82vh, calc(var(--vvh, 100vh) - 12px)); }
+  #sheet.kb .inner { padding-bottom: 14px; }
+  #sheet h2 { margin: 0; }
   .fill { height: 100%; border-radius: inherit; transform-origin: left center; transform: scaleX(0); transition: transform .5s cubic-bezier(.22,.9,.34,1); }
   .txn { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--hair); }
   .txn:first-of-type { border-top: 0; padding-top: 2px; }
   .card.list .txn:first-of-type { padding-top: 2px; }
   .chev { color: var(--muted); font-size: 22px; line-height: 1; margin-left: -4px; flex: 0 0 auto; }
-  .txn.imported .m { white-space: normal; overflow-wrap: anywhere; }
+  .txn.imported .m, .txn.wrap .m { white-space: normal; overflow-wrap: anywhere; }
   .issues { margin: 4px 0 6px; padding-left: 18px; color: var(--text); font-size: 12px; line-height: 1.5; }
   details.issues { padding-left: 0; }
   details.issues summary { font-weight: 600; padding: 8px 0; }
@@ -133,7 +148,7 @@
   nav .ico { position: relative; display: inline-flex; height: 22px; }
   nav .ico svg { width: 22px; height: 22px; }
   nav .badge { position: absolute; top: -6px; right: -13px; background: var(--badge); color: var(--badge-ink);
-    border-radius: 9px; font-size: 11px; font-weight: 800; min-width: 18px; height: 18px; padding: 0 5px;
+    border-radius: 9px; font-size: 12px; font-weight: 800; min-width: 18px; height: 18px; padding: 0 5px;
     display: inline-flex; align-items: center; justify-content: center; }
   .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
   .chips button { background: var(--fill); border: 1px solid var(--chip-line); color: var(--text);
@@ -160,6 +175,17 @@
   .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   label.btn:focus-within { outline: 2.5px solid var(--blue); outline-offset: 2px; }
   .fieldlabel { font-size: 13px; font-weight: 600; color: var(--muted); margin: 16px 0 -6px 2px; }
+  label.fieldlabel.stacked { display: block; margin: 0 0 6px 2px; }
+  /* More tab: small muted group labels above the cards (not cards themselves). */
+  .grouplabel { font-size: 13px; font-weight: 700; color: var(--muted); margin: 26px 4px 0; }
+  .grouplabel + .card { margin-top: 8px; }
+  /* Row sheet: the current category as one row, the chips only when asked for. */
+  .catrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; padding: 4px 0; min-height: 44px; border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair); }
+  .catrow .cn { font-size: 15px; font-weight: 600; color: var(--muted); }
+  .catrow .cn b { color: var(--text); font-weight: 800; }
+  .catrow .cbtn { background: var(--fill); border: 0; color: var(--blue); font: inherit; font-size: 14px; font-weight: 700; border-radius: 14px; padding: 0 16px; min-height: 44px; }
+  .chips.stack button[data-c] { flex: 1 1 100%; text-align: left; }
+  .chips button.sugg, .chips.cats button.sugg[data-c] { flex: 1 1 100%; text-align: left; border-color: var(--accent); }
   /* Spend | Paid back segmented control (Add tab). */
   .seg { display: flex; background: var(--fill); border-radius: 18px; padding: 3px; margin-top: 16px; }
   .seg button { flex: 1; background: none; border: 0; border-radius: 15px; padding: 9px 0; min-height: 44px;
@@ -176,7 +202,7 @@
   details.fold[open] { padding-bottom: 18px; }
   @media (prefers-reduced-motion: reduce) { details.fold summary::after { transition: none; } }
   details.help { margin-top: 18px; font-size: 13px; color: var(--muted); }
-  details.help summary { text-align: center; color: var(--blue); font-weight: 700; padding: 12px 0; list-style: none; }
+  details.help summary { text-align: center; color: var(--blue); font-weight: 700; padding: 0; min-height: 44px; display: flex; align-items: center; justify-content: center; list-style: none; }
   details.help summary::-webkit-details-marker { display: none; }
   details.help ul { margin: 4px 0 0; padding-left: 18px; line-height: 1.55; }
   /* Import review: flagged rows + row actions. */
@@ -203,11 +229,11 @@
   .colchart .col .bar { width: calc(100% - 2px); max-width: 24px; border-radius: 6px 6px 0 0; background: color-mix(in srgb, var(--bar) 50%, transparent); transition: background-color .15s; }
   .colchart .col[aria-pressed="true"] .bar { background: var(--bar); }
   @media (hover: hover) { .colchart .col:hover .bar { background: color-mix(in srgb, var(--bar) 75%, transparent); } }
-  .colchart .col .lab { font-size: 11px; padding: 6px 0 4px; }
+  .colchart .col .lab { font-size: 12px; padding: 6px 0 4px; }
   .colchart .col[aria-pressed="true"] .lab { color: var(--text); font-weight: 700; }
   /* Per-screenshot check list in the import summary. */
   .filecheck { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; line-height: 1.45; padding: 5px 0; }
-  .filecheck .mark { flex: 0 0 18px; height: 18px; border-radius: 100px; display: grid; place-items: center; font-size: 11px; font-weight: 800; margin-top: 1px; }
+  .filecheck .mark { flex: 0 0 18px; height: 18px; border-radius: 100px; display: grid; place-items: center; font-size: 12px; font-weight: 800; margin-top: 1px; }
   .filecheck .mark.ok { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green); }
   .filecheck .mark.warn { background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--amber); }
   .filecheck .why { color: var(--amber); font-weight: 600; }
@@ -228,9 +254,14 @@
   .btn:disabled { opacity: .4; }
   .hidden { display: none !important; }
   /* Header: month + review pill, big title, three round controls. */
-  header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-  header .hl { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-  header .hrow { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
+  /* Two rows: month + review pill across the full width (so they never wrap onto
+     separate lines), then the title with the round controls beside it. The first
+     row keeps the pill's height when the pill hides, so the title never jumps. */
+  header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 12px; row-gap: 2px; }
+  header .hl { display: contents; }
+  header .hrow { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; min-height: 30px; }
+  header #title { grid-column: 1; min-width: 0; }
+  header .hdr-right { grid-column: 2; grid-row: 2; }
   #month { font-size: 13px; font-weight: 600; color: var(--muted); }
   #title { margin: 0; font-size: clamp(26px, 7.4vw, 30px); font-weight: 800; letter-spacing: -.5px; line-height: 1.15; }
   .hdr-right { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
@@ -238,8 +269,8 @@
     color: var(--icon); display: grid; place-items: center; margin: 0; }
   .rbtn svg { width: 22px; height: 22px; }
   .rbtn .eye-off { display: none; }
-  .rbtn[aria-pressed="true"] .eye { display: none; }
-  .rbtn[aria-pressed="true"] .eye-off { display: block; }
+  .rbtn.off .eye { display: none; }
+  .rbtn.off .eye-off { display: block; }
   .timebtn { height: 44px; padding: 0 14px; border-radius: 22px; border: 1.5px solid var(--icon); background: var(--mint); color: var(--mint-ink);
     display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 700; }
   .timebtn svg { width: 18px; height: 18px; }
@@ -279,23 +310,32 @@
   .jar-lid { fill: var(--icon); }
   .jar-glass { fill: var(--jar-glass); }
   .jar-water { fill: var(--gold); transition: transform .8s cubic-bezier(.22,.9,.34,1); }
+  .jar-water.dim { opacity: .45; } /* a pot with no target: full but faded, never "empty" */
   .jar-line { fill: none; stroke: var(--icon); stroke-width: 4; }
-  .jar-pct { font-size: 19px; font-weight: 800; fill: var(--jar-text); text-anchor: middle;
-    paint-order: stroke; stroke: var(--jar-glass); stroke-width: 4px; stroke-linejoin: round; }
+  /* "50%" over "left", pinned in the upper part of the jar (not on the waterline); the glass-coloured
+     halo keeps both legible over glass and over water. */
+  .jar-pct, .jar-sub { font-weight: 800; fill: var(--jar-text); text-anchor: middle;
+    paint-order: stroke; stroke: var(--jar-glass); stroke-linejoin: round; }
+  .jar-pct { font-size: 20px; stroke-width: 4px; }
+  .jar-sub { font-size: 12px; stroke-width: 3.5px; }
   .actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
   .abtn { height: 56px; border-radius: 20px; border: 0; font-size: 16px; font-weight: 800; display: flex; align-items: center; justify-content: center; gap: 8px; }
   .abtn svg { width: 20px; height: 20px; flex: none; }
-  .abtn.gold { background: var(--gold); color: var(--gold-ink); }
+  .abtn.gold, #addSave { background: var(--gold); color: var(--gold-ink); }
+  /* Add form footer: the Log button. In the sheet it is pinned to the bottom of the scroll area
+     (content scrolls under it); as its own tab it is a plain block. */
+  .addfoot .btn { margin-top: 16px; }
+  #addHost .addfoot { position: sticky; bottom: 0; z-index: 2; background: var(--sheet); border-top: 1px solid var(--hair);
+    margin: 10px -18px 0; padding: 0 18px calc(12px + env(safe-area-inset-bottom)); }
+  #addHost .addfoot .btn { margin-top: 12px; }
+  #sheet.kb #addHost .addfoot { padding-bottom: 12px; }
   .abtn.mintb { background: var(--mintbtn); border: 1.5px solid var(--mintbtn-line); color: var(--mint-ink); }
   .abtn:active { transform: scale(.98); }
-  /* Tabung summary rows (Home) and pot cards (Tabung tab). */
-  .potrow { margin-top: 14px; }
-  .potrow:first-of-type { margin-top: 0; }
-  .potrow .l { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 15px; font-weight: 700; }
-  .potrow .l .of, .pot .of { font-weight: 500; color: var(--muted); }
-  /* The amount never breaks ("RM2,446 of / RM20,940"); a long pot name wraps instead. */
-  .potrow .l > span:last-child { white-space: nowrap; flex: none; }
-  .potrow .l > span:first-child { min-width: 0; }
+  /* Tabung: one tappable row on Home, pot cards on the Tabung tab. */
+  .pot .of, .card.tabrow .of { font-weight: 500; color: var(--muted); }
+  .card.tabrow { padding: 6px 18px; }
+  .card.tabrow .txn { padding: 8px 0; border-top: 0; min-height: 44px; }
+  .card.tabrow .val { white-space: normal; text-align: right; }
   .pot .head { display: flex; align-items: center; gap: 16px; }
   .pot .head .jar { flex: none; }
   .pot .nm { font-size: 17px; font-weight: 800; }
@@ -351,10 +391,10 @@
         <div class="hrow"><div id="month"></div><button type="button" id="statusPill" class="pill good hidden">all clear</button></div>
         <h1 id="title">Spending</h1></div>
       <div class="hdr-right">
-        <button type="button" id="hideBtn" class="rbtn" aria-label="Hide amounts" aria-pressed="false">
+        <button type="button" id="hideBtn" class="rbtn" aria-label="Hide amounts" title="Hide amounts">
           <svg class="eye" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
           <svg class="eye-off" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><path d="M3 3l18 18"/></svg></button>
-        <button type="button" id="timeBtn" class="timebtn" aria-pressed="false" aria-label="Show spending as days of your work">
+        <button type="button" id="timeBtn" class="timebtn" aria-pressed="false" aria-label="Show amounts as work time" title="Show amounts as work time">
           <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Time</button>
         <button id="tab-refresh" aria-label="Refresh"><span class="ico"><svg viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18.4 11a7.4 7.4 0 1 1-2.16-5.24"/><path d="M18.6 2.8v3.6h-3.6" stroke-linejoin="round"/></svg></span></button></div>
     </header>
@@ -362,7 +402,8 @@
     <div id="view-pots" class="hidden"></div>
     <div id="view-review" class="hidden"></div>
     <div id="view-more" class="hidden">
-      <div class="card"><h3>Import screenshots</h3>
+      <div class="grouplabel" id="gl-import" style="margin-top:20px">Import</div>
+      <div class="card"><h2>Import screenshots</h2>
         <div class="muted" style="font-size:13px">Screenshots of an app&rsquo;s transaction history &mdash; pick the app, choose the images.</div>
         <div class="chips" id="uploadChips" role="group" aria-label="Which app"></div>
         <label class="btn secondary" style="margin-top:12px">Choose screenshots
@@ -378,7 +419,7 @@
       <div class="seg" role="group" aria-label="What are you logging">
         <button type="button" id="modeSpend" aria-pressed="true">Spend</button>
         <button type="button" id="modePaid" aria-pressed="false">Paid back</button></div>
-      <div class="card" id="addCard"><h3 id="addTitle">Log a spend</h3>
+      <div class="card" id="addCard"><h2 id="addTitle">Log a spend</h2>
         <div class="chips hidden" id="recentChips" role="group" aria-label="Repeat a recent quick-add" style="margin-top:0"></div>
         <div id="amountRow" style="display:flex;gap:10px;margin-top:12px">
           <input type="text" inputmode="decimal" id="addAmount" aria-label="Amount" placeholder="0.00" style="flex:1" autocomplete="off">
@@ -401,9 +442,9 @@
         <div id="addExtra" class="hidden" style="display:flex;gap:10px;margin-top:14px">
           <input type="date" id="addDate" aria-label="Date" style="flex:1">
           <input type="text" id="addNote" aria-label="Note" placeholder="Note (optional)" style="flex:1.3" autocomplete="off"></div>
-        <button class="btn" id="addSave" type="submit">Log spend</button>
       </div>
       </form>
+      <div class="addfoot" id="addFoot"><button class="btn" id="addSave" type="submit" form="addForm">Log spend</button></div>
       <details class="help" id="addHelp"><summary>How logging works</summary><ul>
         <li>Same pipeline as Apple Pay taps &mdash; dedup, alerts and budgets included.</li>
         <li>No category? The rules decide, or it lands in Review.</li>
@@ -424,6 +465,6 @@
   <div id="sheet" class="hidden"></div>
   <div id="toast" role="status" aria-live="polite"></div>
   <!-- bump ?v= on every app.js change: Safari/PWA caches are sticky -->
-  <script src="app.js?v=34"></script>
+  <script src="app.js?v=35"></script>
 </body>
 </html>

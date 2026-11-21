@@ -231,6 +231,73 @@ t('paceColor', () => {
   eq(A.paceColor(60, null, 100), 'var(--green)');      // no projection: judged on spent
 });
 
+// ---------- budget bars drain: full = left ----------
+t('budgetBar: untouched envelope is full, on track, no tick', () => {
+  const b = A.budgetBar(0, 600, 0, false);
+  eq(b.leftPct, 100); eq(b.state, 'ok'); eq(b.tickPct, null);
+});
+t('budgetBar: half spent is half full; the tick is where it lands (projected amount LEFT)', () => {
+  const b = A.budgetBar(300, 600, 300, false);
+  eq(b.leftPct, 50); eq(b.state, 'ok'); eq(b.tickPct, null);          // projection = spent: no tick
+  const c = A.budgetBar(300, 600, 450, false);                         // heading to RM450 of RM600: 25% left at month end
+  eq(c.leftPct, 50); eq(c.state, 'ok'); eq(c.tickPct, 25);
+});
+t('budgetBar: heading over puts the tick at the left edge and keeps the bar (orange)', () => {
+  const b = A.budgetBar(300, 400, 520, false);
+  eq(b.state, 'heading'); eq(b.leftPct, 25); eq(b.tickPct, 0);
+  eq(A.budgetBar(300, 400, 401, false).state, 'ok');                   // within RM1 slack
+  eq(A.budgetBar(300, 400, 401.5, false).state, 'heading');
+});
+t('budgetBar: overspent is an empty bar, no tick', () => {
+  const b = A.budgetBar(450, 400, 450, false);
+  eq(b.state, 'over'); eq(b.leftPct, 0); eq(b.tickPct, null);
+  eq(A.budgetBar(400, 400, 400, false).state, 'ok');                   // exactly at the cap is not over
+  eq(A.budgetBar(400, 400, 400, false).leftPct, 0);
+});
+t('budgetBar: cap 0 never divides by zero', () => {
+  let b = A.budgetBar(0, 0, 0, false);
+  eq(b.leftPct, 0); eq(b.tickPct, null); eq(b.state, 'ok');
+  b = A.budgetBar(12, 0, 12, false);
+  eq(b.leftPct, 0); eq(b.state, 'over');
+  eq(A.budgetBar(5, undefined, undefined, false).state, 'over');
+});
+t('budgetBar: a fixed bill that has landed is empty and "paid", not a warning', () => {
+  const b = A.budgetBar(60, 60, 60, true);
+  eq(b.state, 'paid'); eq(b.leftPct, 0); eq(b.tickPct, null);
+  eq(A.budgetBar(59.8, 60, 59.8, true).state, 'paid');                 // within 50 sen
+  const open = A.budgetBar(0, 60, 0, true);                            // not charged yet: full, no tick
+  eq(open.state, 'ok'); eq(open.leftPct, 100); eq(open.tickPct, null);
+  eq(A.budgetBar(0, 60, 40, true).tickPct, null);                      // fixed bills never pace
+});
+t('budgetBar: a non-fixed envelope at its cap is never "paid"', () => {
+  eq(A.budgetBar(60, 60, 60, false).state, 'ok');
+});
+
+// ---------- jar level, keyboard inset, signed money ----------
+t('jarWaterY: area-linear, empty to full, 50% at the middle', () => {
+  eq(A.jarWaterY(0), 88);
+  eq(A.jarWaterY(100), 0);
+  assert.ok(Math.abs(A.jarWaterY(50) - 44) < 0.2, String(A.jarWaterY(50)));
+  let prev = 89;
+  for (let p = 0; p <= 100; p += 5) { const y = A.jarWaterY(p); assert.ok(y < prev, 'monotonic at ' + p); prev = y; }
+  // 12% of the glass's area needs a little MORE height than 12% of its height (the bottom is rounded and narrow)
+  assert.ok(88 - A.jarWaterY(12) > 88 * 0.12);
+  eq(A.jarWaterY(-5), 88); eq(A.jarWaterY(250), 0); eq(A.jarWaterY(NaN), 88);
+});
+t('kbInset: keyboard height from the visual viewport; browser chrome is ignored', () => {
+  eq(A.kbInset(800, 800, 0), 0);                 // no keyboard
+  eq(A.kbInset(800, 480, 0), 320);               // keyboard open
+  eq(A.kbInset(800, 480, 60), 260);              // page panned down 60px: that part is not covered
+  eq(A.kbInset(800, 740, 0), 0);                 // 60px of URL bar, under the 80px floor
+  eq(A.kbInset(800, 820, 0), 0);                 // never negative
+  eq(A.kbInset(800, 480, undefined), 320);
+});
+t('fmtSigned: money in is +RM, money out is plain', () => {
+  eq(A.fmtSigned(-35), '+RM35.00');
+  eq(A.fmtSigned(35), 'RM35.00');
+  eq(A.fmtSigned(0), 'RM0.00');
+});
+
 // ---------- flags ----------
 const flagSnap = (extra) => Object.assign({
   budgets: { Food: 400, Shopping: 1000 },

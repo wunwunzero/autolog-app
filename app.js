@@ -16,7 +16,7 @@
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
-const APP_VERSION = 34; // keep in step with index.html's app.js?v=
+const APP_VERSION = 35; // keep in step with index.html's app.js?v=
 // The backend address is fixed and not secret (auth lives in the key), so connecting
 // only truly requires the key itself.
 const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
@@ -132,6 +132,8 @@ const fmtRaw = (v) => (v < 0 ? '-' : '') + 'RM' + grouped(Math.abs(v).toFixed(2)
 const fmt = (v) => (hideOn ? MASK : fmtRaw(v));
 const fmtWhole = (v) => (hideOn ? MASK : (v < 0 ? '-' : '') + 'RM' + grouped(String(Math.round(Math.abs(v)))));
 // A stored string with amounts in it (the undo pill's text), masked at display time.
+// Money coming in always reads +RM35.00 (green where it is a coloured figure); money out is RM35.00.
+const fmtSigned = (v) => (v < 0 ? '+' + fmt(-v) : fmt(v));
 const maskText = (s) => (hideOn ? String(s).replace(/-?RM[\d,]+(\.\d+)?/g, MASK) : s);
 
 // Time mode: money as time at work, from pay per HOUR. Pure.
@@ -319,17 +321,27 @@ const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 
 // action {label, run}: an inline button (e.g. Undo) — the toast then stays 6s
 // and takes taps; plain toasts never block what's underneath.
+function hideToast() {
+  const t = $('toast');
+  t.style.opacity = 0;
+  t.style.transform = 'translateX(-50%) translateY(8px)';
+  t.style.pointerEvents = 'none';
+}
+// An action toast (Undo, a rule offer) belongs to the screen it was raised on:
+// switching tab dismisses it. Plain toasts just run their short clock.
+function dismissActionToast() {
+  const t = $('toast');
+  if (!t.querySelector('.toast-act')) return;
+  clearTimeout(t._h);
+  hideToast();
+}
 function toast(msg, action, action2) {
   const t = $('toast');
   t.textContent = '';
   const span = document.createElement('span');
   span.textContent = msg;
   t.appendChild(span);
-  const hide = () => {
-    t.style.opacity = 0;
-    t.style.transform = 'translateX(-50%) translateY(8px)';
-    t.style.pointerEvents = 'none';
-  };
+  const hide = hideToast;
   [action, action2].forEach((a) => {
     if (!a) return;
     const b = document.createElement('button');
@@ -494,13 +506,17 @@ const CATS = {
   'Fuel': ['⚡', 'var(--c-cyan)'], 'Health': ['💊', 'var(--c-mint)'], 'Shopping': ['🛍', 'var(--c-purple)'],
   'Subscriptions': ['🗓️', 'var(--c-indigo)'], 'Phone & Internet': ['📱', 'var(--c-gray)'], 'Family': ['🏠', 'var(--c-brown)'],
   'Entertainment': ['🎾', 'var(--c-gold)'], 'Travel Fund': ['✈️', 'var(--c-teal)'],
-  'TRANSFER': ['🏦', 'var(--c-gray)'], 'REFUND': ['💰', 'var(--c-green)'], 'Uncategorized': ['❔', 'var(--c-gray)'],
-  'REVIEW': ['⚠️', 'var(--c-gray)'], 'DUPLICATE?': ['⚠️', 'var(--c-gray)']
+  'TRANSFER': ['🏦', 'var(--c-gray)'], 'REFUND': ['💰', 'var(--c-green)'], 'Uncategorized': ['?', 'var(--c-gray)'],
+  'REVIEW': ['?', 'var(--c-gray)'], 'DUPLICATE?': ['?', 'var(--c-gray)']
 };
 const catOf = (name) => CATS[name] || ['•', 'var(--c-gray)'];
 function catIcon(name, size) {
-  const [icon, color] = catOf(name);
   const px = size || 36;
+  // No category yet (Uncategorized / REVIEW / DUPLICATE? / nothing): a "?" on a dashed tile, never an emoji.
+  if (!name || NOT_PICKABLE[name]) {
+    return `<span class="caticon unset" aria-hidden="true" style="width:${px}px;height:${px}px;font-size:${Math.round(px * 0.5)}px">?</span>`;
+  }
+  const [icon, color] = catOf(name);
   const mix = color === 'var(--c-gray)' ? 30 : 18; // grey at 18% vanished on white
   return `<span class="caticon" aria-hidden="true" style="width:${px}px;height:${px}px;font-size:${Math.round(px * 0.5)}px;background:color-mix(in srgb, ${color} ${mix}%, transparent)">${icon}</span>`;
 }
@@ -508,11 +524,12 @@ function catIcon(name, size) {
 // Category chips (critique 29 Sep 2026): icon + name, the 4 likeliest first and
 // the rest behind "More" — ten flat text chips were a scan. A selection hidden
 // in the rest opens the rest.
-function chipHtml(c, selected) {
-  return `<button type="button" data-c="${esc(c)}"${selected ? ' class="sel"' : ''} aria-pressed="${selected ? 'true' : 'false'}"><span class="ci" aria-hidden="true">${catOf(c)[0]}</span>${esc(c)}</button>`;
+function chipHtml(c, selected, label) {
+  return `<button type="button" data-c="${esc(c)}"${selected ? ' class="sel"' : ''} aria-pressed="${selected ? 'true' : 'false'}"><span class="ci" aria-hidden="true">${catOf(c)[0]}</span>${esc(label || c)}</button>`;
 }
 // TRANSFER/REFUND aren't spending envelopes: they sit last, under their own label.
 const RESERVED_CATS = ['TRANSFER', 'REFUND'];
+const NOT_SPEND_NAME = { TRANSFER: 'Transfer', REFUND: 'Refund' }; // the short names for the values the backend keeps
 function catChipsHtml(cats, top, selected) {
   const envelopes = cats.filter((c) => !RESERVED_CATS.includes(c));
   const reserved = cats.filter((c) => RESERVED_CATS.includes(c));
@@ -589,7 +606,7 @@ function barRow(name, right, pct, color, opts) {
   return `<div class="barrow${opts.cat ? ' tappable' : ''}"${opts.cat ? ` data-cat="${esc(opts.cat)}" role="button" tabindex="0" aria-label="${esc(label)}"` : ''}>
     ${catIcon(name)}<div class="mid">
     <div class="top"><span class="name">${esc(name)}</span><span class="amt" style="${opts.amtColor ? 'color:' + opts.amtColor : ''}">${right}</span></div>
-    <div class="track" aria-hidden="true"><div class="fill" style="width:${pct}%;background:${color}" data-w="${pct}"></div>
+    <div class="track${opts.trackCls ? ' ' + opts.trackCls : ''}" aria-hidden="true"><div class="fill" style="width:${pct}%;background:${color}" data-w="${pct}"></div>
     ${opts.pacePct !== undefined ? `<div class="pace" style="left:calc(${opts.pacePct}% - 1px)"></div>` : ''}</div>
     ${opts.paceText ? `<div class="pacetext" style="color:${opts.paceColor || 'var(--muted)'}">${opts.paceText}</div>` : ''}</div>${opts.cat ? '<span class="chev" aria-hidden="true">&rsaquo;</span>' : ''}</div>`;
 }
@@ -682,34 +699,69 @@ const plainText = (h) => String(h).replace(/<[^>]*>/g, '').replace(/&middot;/g, 
 
 // The jar: a glass jar filled to `pct` (0-100) in the water colour. Drawn from tokens
 // via classes (no colour attributes); `id` must be unique per jar (the clipPath). With
-// opts.animate the water rises from empty on the next frame (animateFills).
+// opts.animate the water rises from empty on the next frame (animateFills). The fill is
+// linear in the jar's AREA (the glass is a rounded rectangle, so equal height steps are not
+// equal amounts of water at the narrow bottom): a 12% pot looks 12% full, like its bar.
+// opts.text adds "NN%" over "left" (the Home jar). opts.noTarget draws the jar full but
+// faded, with no figure: a pot that holds money but has no target must not look empty.
+const JAR_SHAPE = { w: 80, h: 88, r: 20 };
+function jarWidthAt(t) { // inner width of the glass, t units above its bottom
+  const { w, h, r } = JAR_SHAPE;
+  const d = t < r ? r - t : t > h - r ? t - (h - r) : 0;
+  return w - 2 * (r - Math.sqrt(Math.max(0, r * r - d * d)));
+}
+let jarTable = null; // cumulative area every 0.25 units of height
+function jarWaterY(pct) { // translateY of the water rect: 0 = jar full, 88 = empty
+  const { h } = JAR_SHAPE;
+  if (!jarTable) {
+    const step = 0.25;
+    jarTable = [0];
+    for (let i = 1; i <= h / step; i++) jarTable.push(jarTable[i - 1] + (jarWidthAt((i - 1) * step) + jarWidthAt(i * step)) / 2 * step);
+  }
+  const p = Math.max(0, Math.min(100, Number(pct) || 0));
+  const target = jarTable[jarTable.length - 1] * p / 100;
+  let lo = 0, hi = jarTable.length - 1;
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (jarTable[mid] <= target) lo = mid; else hi = mid; }
+  const span = jarTable[hi] - jarTable[lo];
+  const filled = (lo + (span > 0 ? (target - jarTable[lo]) / span : 0)) * 0.25;
+  return Math.round((h - filled) * 100) / 100;
+}
 function jarSvg(id, pct, opts) {
   opts = opts || {};
   const w = opts.w || 104;
-  const p = pct === null || pct === undefined ? 0 : Math.max(0, Math.min(100, Math.round(pct)));
-  const y = 88 - 88 * p / 100;
-  const start = opts.animate && !reduceMotion() ? 88 : y;
+  const p = opts.noTarget ? 100 : pct === null || pct === undefined ? 0 : Math.max(0, Math.min(100, Math.round(pct)));
+  const y = jarWaterY(p);
+  const start = opts.animate && !reduceMotion() ? JAR_SHAPE.h : y;
   return `<svg class="jar" role="img" aria-label="${esc(opts.label || ('Jar ' + p + ' percent full'))}" width="${w}" height="${Math.round(w * 120 / 104)}" viewBox="0 0 104 120">
     <defs><clipPath id="${esc(id)}"><rect x="12" y="26" width="80" height="88" rx="20"/></clipPath></defs>
     <rect class="jar-lid" x="32" y="6" width="40" height="14" rx="5"/>
     <rect class="jar-glass" x="12" y="26" width="80" height="88" rx="20"/>
-    <g clip-path="url(#${esc(id)})"><rect class="jar-water" x="12" y="26" width="80" height="88" data-y="${y}" style="transform:translateY(${start}px)"/></g>
+    <g clip-path="url(#${esc(id)})"><rect class="jar-water${opts.noTarget ? ' dim' : ''}" x="12" y="26" width="80" height="88" data-y="${y}" style="transform:translateY(${start}px)"/></g>
     <rect class="jar-line" x="12" y="26" width="80" height="88" rx="20"/>
-    ${opts.text ? `<text class="jar-pct" x="52" y="66">${p}%</text>` : ''}</svg>`;
+    ${opts.text ? `<text class="jar-pct" x="52" y="60">${p}%</text><text class="jar-sub" x="52" y="75">left</text>` : ''}</svg>`;
 }
-const potBarColor = (p) => (p.reached ? 'var(--gold)' : p.low ? 'var(--amber-bar)' : 'var(--savebar)');
+// Every pot bar is gold: gold = money, and a pot's jar and its bar then match.
+const POT_BAR = 'var(--gold)';
 const barWidth = (pct) => Math.max(2, Math.min(100, Math.round(pct)));
-// A budget bar's fill: the status colours are TEXT tokens, bars have their own.
-const BAR_OF = { 'var(--red)': 'var(--red-bar)', 'var(--amber)': 'var(--amber-bar)' };
-const barFill = (c) => BAR_OF[c] || c;
 
-// One summary row of the Tabung card on Home (balance known only). Whole ringgit:
-// with sen, "Emergency cushion RM2,446.21 of RM20,940.00" wrapped onto three lines
-// at phone width; the Tabung tab shows the exact figures.
-function potRowHtml(p) {
-  return `<div class="potrow"><div class="l"><span>${esc(p.name)}</span><span${p.balance < 0 ? ' style="color:var(--red)"' : ''}>${fmtWhole(p.balance)}${p.target
-    ? ` <span class="of">${p.reached ? 'full' : 'of ' + fmtWhole(p.target)}</span>` : ''}</span></div>${p.target
-    ? `<div class="track lg" aria-hidden="true"><div class="fill" style="width:${barWidth(p.pct)}%;background:${potBarColor(p)}" data-w="1"></div></div>` : ''}</div>`;
+// A Budgets bar DRAINS: the fill is the share of the envelope still LEFT, so full = untouched
+// and empty = nothing left (the same meaning as the jar). `projected` is where the month is
+// heading (backend projByCat); the pace tick sits where the bar WILL be at month end
+// (1 - projected/cap), so a tick at the left edge means "heading over". Pure.
+//   state: 'ok' on track · 'heading' projected over the cap · 'over' already overspent
+//          'paid' a fixed bill whose charge has landed (empty, and not a warning).
+//   leftPct / tickPct are 0-100; tickPct is null when there is no tick (fixed bills never pace).
+function budgetBar(spent, cap, projected, fixed) {
+  const sp = Number(spent) || 0;
+  const c = Number(cap) || 0;
+  const proj = Math.max(Number(projected) || 0, sp);
+  const clampPct = (v) => Math.max(0, Math.min(100, v));
+  if (!(c > 0)) return { leftPct: 0, tickPct: null, state: sp > 0.005 ? 'over' : 'ok' };
+  if (sp > c + 0.005) return { leftPct: 0, tickPct: null, state: 'over' };
+  const leftPct = clampPct((c - sp) / c * 100);
+  if (proj > c + 1) return { leftPct, tickPct: fixed ? null : 0, state: 'heading' };
+  if (fixed) return { leftPct: sp >= c - 0.5 && sp > 0 ? 0 : leftPct, tickPct: null, state: sp >= c - 0.5 && sp > 0 ? 'paid' : 'ok' };
+  return { leftPct, tickPct: proj > sp + 0.5 ? clampPct((1 - proj / c) * 100) : null, state: 'ok' };
 }
 
 function openAdd() { if (addAsSheet()) openAddSheet(); else { setTab('add'); window.scrollTo(0, 0); } }
@@ -772,7 +824,7 @@ function renderOverview() {
     const pct = totalBudget > 0 ? Math.max(0, Math.min(100, Math.round(left / totalBudget * 100))) : 0;
     const heroAmt = tm ? workStr(fmtDays(workDays(left, payPerHour))) : fmt(left);
     const heroSub = tm ? `of your work left &middot; ${workStr(fmtDays(workDays(budgetedSpent, payPerHour)))} spent`
-      : `${fmtWhole(budgetedSpent)} of ${fmtWhole(totalBudget)} spent`;
+      : `of ${fmtWhole(totalBudget)} this month &middot; ${fmtWhole(budgetedSpent)} spent`;
     // The daily figure is the number that decides today's purchase, so it stands
     // on its own line in the status row (21 Nov 2026: it used to sit mid-sentence).
     const dayAmt = tm ? W(perDay) : fmt(perDay);
@@ -789,9 +841,9 @@ function renderOverview() {
       const lower = `Already ${fmt(overTotal)} lower for overspent envelopes.`;
       st = { cls: 'amber', icon: ICON_WARN, h: 'Some envelopes are over', day: dayHtml, p: `${forDays}. ${lower}`, say: `${lower} ${keep}` };
     } else st = { cls: 'ok', icon: ICON_OK, h: 'You&rsquo;re on track', day: dayHtml, p: `${forDays}.`, say: keep };
-    const heroLabel = plainText(`Still free to spend ${heroAmt}. ${heroSub}. ${pd ? 'Next payday ' + pdWord + ', ' + pd.label + '. ' : ''}${st.h}. ${st.say} ${todayText}`);
+    const heroLabel = plainText(`Still free to spend ${heroAmt}, ${heroSub}. ${pd ? 'Next payday ' + pdWord + ', ' + pd.label + '. ' : ''}${st.h}. ${st.say} ${todayText}`);
     hero = `<div class="hero" role="group" aria-label="${esc(heroLabel)}"><div aria-hidden="true" style="display:contents">
-      <div class="top">${jarSvg('jarHome', pct, { text: true, animate: firstPaint, label: `Jar ${pct} percent full` })}
+      <div class="top">${jarSvg('jarHome', pct, { text: true, animate: firstPaint, label: `Jar, ${pct} percent of this month's budget left` })}
         <div class="free"><div class="lab">Still free to spend</div><div id="bigTotal" style="font-size:${heroAmt.length >= 11 ? 24 : heroAmt.length >= 9 ? 28 : 34}px">${heroAmt}</div><div class="lab">${heroSub}</div></div></div>
       ${paydayRow}
       <div class="inrow stat ${st.cls}">${st.icon}<div><div class="h">${st.h}</div>${st.day}<div class="p">${st.p}</div>${todayLine}</div></div></div></div>${staleLine}`;
@@ -814,7 +866,7 @@ function renderOverview() {
   // synced): kept on screen until ticked off, not on a 2-second toast.
   const todos = actualTodos();
   if (todos.length) {
-    html += `<div class="card notice"><h3>To do in Actual</h3>` + todos.map((x, i) => `<div class="txn" style="gap:10px">
+    html += `<div class="card notice"><h2>To do in Actual</h2>` + todos.map((x, i) => `<div class="txn" style="gap:10px">
       <div style="min-width:0;flex:1"><div class="m">Delete &ldquo;${esc(x.merchant)}&rdquo;</div>
       <div class="sub">${esc(fmtDay(x.date))} &middot; ${x.amountMYR === null ? 'no amount' : fmt(x.amountMYR)} &middot; removed here as not real</div></div>
       <div class="rowacts"><button type="button" data-todo="${i}">Done</button></div></div>`).join('') + `</div>`;
@@ -822,44 +874,43 @@ function renderOverview() {
 
   if (data.recap && data.dayOfMonth <= 7) html += recapEntryHtml();
 
-  // Tabung summary: only pots whose balance is known; no card when none is.
+  // Tabung: ONE tappable row (the pots themselves live on the Tabung tab): the total across the
+  // pots whose balance is known. No row when none is known.
   const pots = potsFor(data, potTargets).filter((p) => p.balance !== null);
   if (pots.length) {
-    html += `<div class="card"><h3><span>Tabung</span><button type="button" class="cardhead-btn" id="seeAllPots">See all</button></h3>` +
-      pots.map(potRowHtml).join('') + `</div>`;
+    const potTotal = pots.reduce((sum, p) => sum + p.balance, 0);
+    html += `<div class="card tabrow"><div class="txn tappable" role="button" tabindex="0" id="seeAllPots"
+      aria-label="${esc(`Tabung, ${fmtWhole(potTotal)} in ${plural(pots.length, 'pot')}. Open`)}"><div style="min-width:0;flex:1"><div class="m">Tabung</div></div>
+      <div class="val"${potTotal < 0 ? ' style="color:var(--red)"' : ''}>${fmtWhole(potTotal)} <span class="of">in ${plural(pots.length, 'pot')}</span></div><span class="chev" aria-hidden="true">&rsaquo;</span></div></div>`;
   }
 
   if (bCats.length) {
+    const fixedCats = data.fixedCats || [];
     const rows = bCats.map((c) => {
-      const s = byCat[c] || 0;
-      const proj = data.projByCat && typeof data.projByCat[c] === 'number' ? Math.max(data.projByCat[c], s) : s;
-      return { c, s, cap: budgets[c], proj, r: s / budgets[c], rank: proj / budgets[c] };
-    }).sort((a, b) => b.rank - a.rank);
-    html += `<div class="card list"><h3>Budgets</h3>` +
+      const sp = byCat[c] || 0;
+      const proj = data.projByCat && typeof data.projByCat[c] === 'number' ? Math.max(data.projByCat[c], sp) : sp;
+      const bb = budgetBar(sp, budgets[c], proj, fixedCats.includes(c));
+      return { c, s: sp, cap: budgets[c], proj, bb, rank: proj / budgets[c] };
+    // Riskiest first; a fixed bill that is already paid goes to the bottom (stable otherwise).
+    }).sort((a, b) => (a.bb.state === 'paid') - (b.bb.state === 'paid') || b.rank - a.rank);
+    html += `<div class="card list"><h2>Budgets</h2>` +
       rows.map((x) => {
-        const status = paceColor(x.s, x.proj, x.cap);
-        const over = x.s > x.cap + 0.005;
+        const bb = x.bb;
         const opts = { cat: x.c };
-        if (over) opts.amtColor = 'var(--red)';
-        else if (status !== 'var(--green)') opts.amtColor = status;
-        // The projection tick + caption only when the month is heading over the cap.
-        if (!over && x.proj > x.cap + 1) {
-          opts.pacePct = 100;
-          opts.paceColor = status;
+        // Bars drain: the fill is what is LEFT. Neutral while on track; orange when the month is
+        // heading over (projection passes the cap); overspent = an empty, faintly red track.
+        let fill = 'var(--bar)';
+        if (bb.state === 'over') { opts.amtColor = 'var(--red)'; opts.trackCls = 'over'; }
+        else if (bb.state === 'heading') {
+          fill = 'var(--amber-bar)';
+          opts.amtColor = 'var(--amber)';
+          opts.paceColor = 'var(--amber)';
           opts.paceText = `heading ${fmt(x.proj - x.cap)} over at this pace`;
-        } else if (typeof x.proj === 'number' && x.proj > x.s + 0.5 && x.cap > 0) {
-          opts.pacePct = Math.min(100, Math.round(x.proj / x.cap * 100));
-        }
-        // A bill envelope (backend fixedCats) is never paced; once its charge has
-        // landed, say so instead of leaving a bare "RM0.00 left".
-        const fixed = (data.fixedCats || []).includes(x.c);
-        if (fixed && !over && opts.pacePct === undefined && x.s >= x.cap - 0.5 && x.s > 0) opts.paceText = 'paid for the month';
-        const right = over ? `${fmt(x.s - x.cap)} over` : `${fmt(x.cap - x.s)} left`;
-        // One neutral tint while on track (29 Sep 2026, user choice): category
-        // colours stay on the icon tiles, so amber and red on a bar only ever
-        // mean "heading over" and "over".
-        const fill = over ? 'var(--red-bar)' : status !== 'var(--green)' ? barFill(status) : 'var(--bar)';
-        return barRow(x.c, right, Math.max(2, Math.min(100, Math.round(x.r * 100))), fill, opts);
+        } else if (bb.state === 'paid') opts.paceText = 'paid for the month'; // muted, not a warning
+        if (bb.tickPct !== null) opts.pacePct = bb.tickPct;
+        const right = bb.state === 'over' ? `${fmt(x.s - x.cap)} over` : `${fmt(x.cap - x.s)} left`;
+        const w = bb.leftPct > 0 ? Math.max(2, Math.round(bb.leftPct)) : 0;
+        return barRow(x.c, right, w, fill, opts);
       }).join('') + `</div>`;
   }
 
@@ -868,23 +919,23 @@ function renderOverview() {
   if (others.length) {
     const max = Math.max(others[0].s, 0.01);
     // These bars are relative to the biggest row (no cap to measure against) — say so.
-    html += `<div class="card list"><h3><span>${bCats.length ? 'Other spending' : 'Spending'}</span><span class="hnote">bars relative to the largest</span></h3>` +
-      others.map((x) => barRow(x.c, fmt(x.s), Math.max(2, Math.round(x.s / max * 100)), 'var(--bar)', { cat: x.c })).join('') +
+    html += `<div class="card list"><h2><span>${bCats.length ? 'Other spending' : 'Spending'}</span><span class="hnote">bars relative to the largest</span></h2>` +
+      others.map((x) => barRow(x.c, fmt(x.s), Math.max(2, Math.round(x.s / max * 100)), 'var(--bar)', { cat: x.c, trackCls: 'thin' })).join('') +
       '</div>';
   }
 
   // Who still owes you (rows tagged "fronted: name"; empty list = card hidden).
   if (data.fronted && data.fronted.length) {
-    html += `<div class="card"><h3>Owed to you</h3>` +
+    html += `<div class="card"><h2>Owed to you</h2>` +
       data.fronted.map((f, i) => `<div class="txn tappable" role="button" tabindex="0" data-owed="${i}"
         aria-label="${esc(f.name)} owes ${esc(fmt(f.outstandingMYR))}. Log their repayment"><div style="min-width:0;flex:1">
         <div class="m">${esc(f.name)}</div>
         <div class="sub">since ${esc(f.since ? fmtDay(f.since) : '?')} &middot; ${plural(f.count, 'row')}</div></div>
-        <div class="val" style="color:var(--yellow)">${fmt(f.outstandingMYR)}</div><span class="chev" aria-hidden="true">&rsaquo;</span></div>`).join('') +
+        <div class="val">${fmt(f.outstandingMYR)}</div><span class="chev" aria-hidden="true">&rsaquo;</span></div>`).join('') +
       `<div class="muted" style="font-size:12px;padding-top:8px">Paid back? Tap their name to log it.</div></div>`;
   }
 
-  html += `<div class="card list"><h3>Recent</h3>` +
+  html += `<div class="card list"><h2>Recent</h2>` +
     (data.recent || []).map((t, i) => txnRow(t, 'data-ri="' + i + '"')).join('') +
     `</div><div class="muted" style="text-align:center;margin-top:20px;font-size:12px">Updated ${esc(fmtUpdated(data.generatedAt))}</div>`;
   const view = $('view-overview');
@@ -1037,7 +1088,7 @@ function renderSearch(q) {
 function txnRow(t, attr, longDate) {
   const inflow = t.amountMYR !== null && t.amountMYR < 0;
   return `<div class="txn tappable" role="button" tabindex="0" ${attr}>${catIcon(t.category)}<div style="min-width:0;flex:1"><div class="m">${esc(t.merchant || '(no merchant)')}</div>
-    <div class="sub">${esc(longDate ? fmtCoverageDate(t.date) : fmtDay(t.date))} &middot; ${esc(t.category)}${t.fronted ? ` &middot; <span style="color:var(--yellow)">fronted: ${esc(t.fronted)}</span>` : ''}</div></div>
+    <div class="sub">${esc(longDate ? fmtCoverageDate(t.date) : fmtDay(t.date))} &middot; ${esc(t.category)}${t.fronted ? ` &middot; <span style="color:var(--text);font-weight:600">fronted: ${esc(t.fronted)}</span>` : ''}</div></div>
     <div class="val${inflow ? ' in' : ''}">${t.amountMYR === null ? '—' : (inflow ? '+' + fmt(-t.amountMYR) : fmt(t.amountMYR))}</div><span class="chev" aria-hidden="true">&rsaquo;</span></div>`;
 }
 
@@ -1059,6 +1110,7 @@ function mountSheet(inner, closeLabel) {
   $('sheetCancel').addEventListener('click', closeSheet);
   const title = $('sheetTitle');
   if (title) { title.tabIndex = -1; title.focus({ preventScroll: true }); }
+  syncSheetKeyboard();
   return sheet;
 }
 const showSheet = (inner) => mountSheet(inner);
@@ -1080,7 +1132,7 @@ function sheetKeys(e) {
 function confirmSheet(title, body, confirmLabel, alt, plain) {
   return new Promise((resolve) => {
     let answered = false;
-    const sheet = mountSheet(`<div id="sheetTitle" style="font-size:17px;font-weight:700">${title}</div>
+    const sheet = mountSheet(`<h2 id="sheetTitle" style="margin:0;font-size:17px;font-weight:700">${title}</h2>
       <div class="muted" style="font-size:14px;margin-top:6px;line-height:1.45">${body}</div>
       <button class="btn${plain ? '' : ' danger'}" id="confirmYes">${confirmLabel}</button>
       ${alt ? `<button class="btn quiet" id="confirmAlt">${alt.label}</button>` : ''}`, 'Cancel');
@@ -1154,7 +1206,7 @@ function recapEntryHtml() {
   const r = data.recap;
   const vs = typeof r.prevTotal === 'number' ? versusPrev(r.total - r.prevTotal, r.prevLabel) : '';
   const sub = plural(r.count, 'transaction') + (vs ? ' · ' + vs : '');
-  return `<div class="card"><h3>Last month</h3><div class="txn tappable" role="button" tabindex="0" data-recap="1"
+  return `<div class="card"><h2>Last month</h2><div class="txn tappable" role="button" tabindex="0" data-recap="1"
     aria-label="${esc(`${r.label} recap: ${fmt(r.total)}, ${sub}. Open`)}"><div style="min-width:0;flex:1">
     <div class="m">${esc(r.label)} recap</div><div class="sub">${esc(sub)}</div></div>
     <div class="val">${fmt(r.total)}</div><span class="chev" aria-hidden="true">&rsaquo;</span></div></div>`;
@@ -1187,7 +1239,7 @@ function openRecapSheet() {
     <div class="sub">${fmt(p.start)} &rarr; ${fmt(p.end)}</div></div>
     <div class="val${p.delta > 0 ? ' in' : ''}"${p.delta < 0 ? ' style="color:var(--amber)"' : ''}>${p.delta > 0 ? '+' : ''}${fmt(p.delta)}</div></div>` : '';
   const pots = s ? pot('Buffer', s.buffer) + pot('Emergency Fund', s.ef) : '';
-  showSheet(`<div id="sheetTitle" style="font-size:17px;font-weight:700">${esc(r.label)} recap</div>
+  showSheet(`<h2 id="sheetTitle" style="margin:0;font-size:17px;font-weight:700">${esc(r.label)} recap</h2>
     <div style="display:flex;align-items:baseline;gap:8px;margin-top:6px"><div class="num" style="font-size:30px;font-weight:800;letter-spacing:-.6px">${fmt(r.total)}</div>
       <div class="muted" style="font-size:13px">${plural(r.count, 'transaction')}</div></div>${vsLine}
     ${cats ? head('By category') + `<div>${cats}</div>` : ''}
@@ -1222,7 +1274,7 @@ function openCategorySheet(cat) {
     : '';
   const chartItems = monthItems((h) => h[cat] || 0);
   const chart = colChartHtml('catChart', chartItems);
-  const sheet = showSheet(`<div id="sheetTitle" style="font-size:17px;font-weight:700">${esc(cat)}</div>
+  const sheet = showSheet(`<h2 id="sheetTitle" style="margin:0;font-size:17px;font-weight:700">${esc(cat)}</h2>
     <div class="muted" style="font-size:13px;margin-top:2px">${plural(rows.length, 'transaction')} this month &middot; ${fmt(total)}${cap ? ' of ' + fmt(cap) : ''}</div>${trend}${chart || histLine}
     <div style="margin-top:6px">${rows.length ? rows.map((t, i) => txnRow(t, 'data-mi="' + i + '"')).join('')
       : '<div class="muted" style="font-size:14px;padding:14px 0">Nothing yet this month.</div>'}</div>`);
@@ -1304,7 +1356,7 @@ function freshImport(t) {
 
 async function notReal(t, after) {
   const yes = await confirmSheet(`Remove &ldquo;${esc(t.merchant)}&rdquo;?`,
-    `${t.amountMYR === null ? '' : fmt(t.amountMYR) + ' &middot; '}${esc(fmtDay(t.date))}<br>Only for a misread line that isn&rsquo;t a real transaction. A real one with a wrong number? Fix its amount instead.`,
+    `${t.amountMYR === null ? '' : fmtSigned(t.amountMYR) + ' &middot; '}${esc(fmtDay(t.date))}<br>Only for a misread line that isn&rsquo;t a real transaction. A real one with a wrong number? Fix its amount instead.`,
     'Remove row', t.amountMYR !== null ? { label: 'Fix amount instead', run: () => fixAmountSheet(t, t._onFix) } : null);
   if (!yes) return;
   try {
@@ -1325,8 +1377,8 @@ async function notReal(t, after) {
 // the original in a repair trail and the next sync corrects Actual too.
 function fixAmountSheet(t, after) {
   const flag = amountFlag(t);
-  const sheet = mountSheet(`<div id="sheetTitle" style="font-size:17px;font-weight:700">Fix amount</div>
-    <div class="muted" style="font-size:13px;margin-top:2px">${esc(t.merchant)} &middot; ${esc(fmtDay(t.date))} &middot; read as ${fmt(t.amountMYR)}</div>
+  const sheet = mountSheet(`<h2 id="sheetTitle" style="margin:0;font-size:17px;font-weight:700">Fix amount</h2>
+    <div class="muted" style="font-size:13px;margin-top:2px">${esc(t.merchant)} &middot; ${esc(fmtDay(t.date))} &middot; read as ${fmtSigned(t.amountMYR)}</div>
     ${flag ? `<div class="flag">${flag}</div>` : ''}
     <div class="fieldlabel" id="fixLabel">Correct amount (RM)</div>
     <div style="margin-top:14px"><input type="text" inputmode="decimal" id="fixAmount" aria-labelledby="fixLabel" value="${Math.abs(t.amountMYR)}" autocomplete="off" style="background:var(--fill);font-size:20px;font-weight:700"></div>
@@ -1417,16 +1469,26 @@ function openRowSheet(t, back) {
       <input type="date" id="editDate" aria-label="Date" max="${localToday()}" value="${esc(t.date)}" style="flex:1;background:var(--fill)"></div>
     <button class="btn secondary" id="editSave">Save changes</button></div>` : '';
   const flag = freshImport(t) ? amountFlag(t) : null;
+  // The quiet actions below the facts: links, not equal-weight buttons.
   const removeBlock = freshImport(t)
     ? `<div class="muted" style="font-size:12px;margin-top:14px">Imported from a screenshot ${Math.round((Date.now() - t.createdMs) / 3600e3)}h ago.</div>
        ${flag ? `<div class="flag">Check the amount: ${flag}</div>` : ''}
-       <div style="display:flex;gap:10px">${t.amountMYR !== null ? '<button class="btn quiet" id="fixBtn">Fix amount</button>' : ''}
-       <button class="btn quiet" id="notRealBtn" style="color:var(--red)">Not real</button></div>` : '';
-  const sheet = mountSheet(`<div id="sheetTitle" style="font-size:17px;font-weight:700">${esc(t.merchant || '(no merchant)')}</div>
-    <div class="muted" style="font-size:13px;margin-top:2px">${esc(fmtDay(t.date))} &middot; ${t.amountMYR === null ? 'no amount' : fmt(t.amountMYR)} &middot; ${esc(srcLabel(t.source))}</div>
-    <div class="fieldlabel" id="rowCatLabel">Category${NOT_PICKABLE[t.category] ? ' &mdash; not set yet' : ''}</div>
-    <div class="chips cats" id="rowCats" role="group" aria-labelledby="rowCatLabel">${catChipsHtml(pickableCats(true),
-      topCats([...(NOT_PICKABLE[t.category] ? [] : [t.category]), ...(suggestCategory(t) ? [suggestCategory(t)] : [])]), t.category)}</div>${removeBlock}${flippable(t)
+       ${t.amountMYR !== null ? '<button type="button" class="linkbtn" id="fixBtn">Fix amount &rsaquo;</button>' : ''}
+       <button type="button" class="linkbtn" id="notRealBtn" style="color:var(--red)">Not real &mdash; remove it &rsaquo;</button>` : '';
+  const inflow = t.amountMYR !== null && t.amountMYR < 0;
+  const amtHtml = t.amountMYR === null ? 'no amount' : inflow ? `<span class="amt-in">${fmtSigned(t.amountMYR)}</span>` : fmt(t.amountMYR);
+  const unset = !t.category || !!NOT_PICKABLE[t.category];
+  const catShown = unset ? 'not set yet' : NOT_SPEND_NAME[t.category] || t.category;
+  const sheet = mountSheet(`<h2 id="sheetTitle" style="margin:0;font-size:17px;font-weight:700">${esc(t.merchant || '(no merchant)')}</h2>
+    <div class="muted" style="font-size:13px;margin-top:2px">${esc(fmtDay(t.date))} &middot; ${amtHtml} &middot; ${esc(srcLabel(t.source))}</div>
+    <div class="catrow"><span class="cn">Category: <b>${esc(catShown)}</b></span>
+      <button type="button" class="cbtn" id="catChange" aria-expanded="false" aria-controls="catReveal">${unset ? 'Choose' : 'Change'}</button></div>
+    <div id="catReveal" class="hidden">
+      <div class="chips cats" id="rowCats" role="group" aria-label="Category">${catChipsHtml(pickableCats(false),
+        topCats([...(unset ? [] : [t.category]), ...(suggestCategory(t) ? [suggestCategory(t)] : [])]), t.category)}</div>
+      <div class="fieldlabel" id="notSpendLabel" style="margin-top:18px">Not a spend</div>
+      <div class="chips stack" id="rowNot" role="group" aria-labelledby="notSpendLabel">${chipHtml('TRANSFER', t.category === 'TRANSFER', 'Transfer between my accounts')}${chipHtml('REFUND', t.category === 'REFUND', 'Refund / money back')}</div>
+    </div>${removeBlock}${flippable(t)
       ? `<button type="button" class="linkbtn" id="flipBtn">Actually a ${t.amountMYR < 0 ? 'spend' : 'refund'}? Flip it &rsaquo;</button>` : ''}${editBlock}
     <button type="button" class="linkbtn" id="frontToggle" aria-expanded="${t.fronted ? 'true' : 'false'}" aria-controls="frontRow">${t.fronted ? 'Fronted for ' + esc(t.fronted) : (t.amountMYR !== null && t.amountMYR < 0 ? 'Repayment from someone?' : 'Paid this for someone?')} &rsaquo;</button>
     <div id="frontRow" class="${t.fronted ? '' : 'hidden'}">
@@ -1439,7 +1501,16 @@ function openRowSheet(t, back) {
   if (back) sheetOnClose = back;
   const rowCats = sheet.querySelector('#rowCats');
   wireMore(rowCats);
-  // Disclosures: the sheet opens on the category chips; the rest unfolds on request.
+  // The category chips (and the "not a spend" choices) stay folded until Change is tapped.
+  const changeBtn = sheet.querySelector('#catChange');
+  changeBtn.addEventListener('click', (e) => {
+    const nowHidden = sheet.querySelector('#catReveal').classList.toggle('hidden');
+    changeBtn.setAttribute('aria-expanded', String(!nowHidden));
+    changeBtn.textContent = nowHidden ? (unset ? 'Choose' : 'Change') : 'Hide';
+    const firstChip = sheet.querySelector('#rowCats button[data-c]');
+    if (!nowHidden && firstChip && e.detail === 0) firstChip.focus({ preventScroll: true }); // keyboard only
+  });
+  // Disclosures: the rest unfolds on request.
   [['frontToggle', 'frontRow', 'frontedName'], ['editToggle', 'editBlock', 'editMerchant']].forEach(([tg, blk, focusId]) => {
     const btn = sheet.querySelector('#' + tg);
     if (!btn) return;
@@ -1449,8 +1520,8 @@ function openRowSheet(t, back) {
       if (!open) sheet.querySelector('#' + focusId).focus({ preventScroll: true });
     });
   });
-  rowCats.querySelectorAll('button[data-c]').forEach((b) => b.addEventListener('click', () => {
-    if (b.dataset.c === t.category) return toast('Already ' + t.category);
+  sheet.querySelectorAll('#catReveal button[data-c]').forEach((b) => b.addEventListener('click', () => {
+    if (b.dataset.c === t.category) return toast('Already ' + (NOT_SPEND_NAME[t.category] || t.category));
     sheetOnClose = null;
     closeSheet();
     recategorize(t, b.dataset.c);
@@ -1554,7 +1625,7 @@ function renderMore() {
   // Older backends don't send `coverage` — hide the card entirely then.
   if (data.coverage) {
     const CHANNELS = [['tng', 'TNG eWallet'], ['hsbc', 'HSBC'], ['rhb', 'RHB Card'], ['alipay', 'Alipay']];
-    covHtml = `<div class="card"><h3>Statements synced until</h3><div style="margin-top:4px">` +
+    covHtml = `<div class="card"><h2>Statements synced until</h2><div style="margin-top:4px">` +
       CHANNELS.map(([k, label]) => {
         const d = data.coverage[k];
         return `<div class="txn"><div class="m">${label}</div>
@@ -1564,13 +1635,13 @@ function renderMore() {
   }
 
   const searchTitle = data.searchMonths ? 'Search' : 'Search this month';
-  searchHtml = `<div class="card"><h3>${searchTitle}</h3>
+  searchHtml = `<div class="card"><h2>${searchTitle}</h2>
     <div><input type="search" id="searchBox" aria-label="${searchTitle}" placeholder="Merchant or amount, e.g. ikea or 117" autocomplete="off" style="background:var(--fill)"></div>
     <div id="searchOut"></div></div>`;
   if (data.recap) html += recapEntryHtml();
   const monthChartItems = monthTotalItems();
   const monthChart = colChartHtml('monthChart', monthChartItems);
-  if (monthChart) html += `<div class="card"><h3>Spending by month</h3>${monthChart}</div>`;
+  if (monthChart) html += `<div class="card"><h2>Spending by month</h2>${monthChart}</div>`;
   // Phone audit: expected real RHB + TnG = Cash + Autolog (the sum doesn't change
   // when you settle) + card taps not yet billed. The typed balance never leaves
   // the phone and isn't stored.
@@ -1579,17 +1650,21 @@ function renderMore() {
     // say so BEFORE the check, not after the verdict.
     const pending = data.reviewTotal
       ? `<div class="flag" style="display:block;margin:0 0 10px">${plural(data.reviewTotal, 'row')} still in Review aren&rsquo;t in Actual yet &mdash; categorise them first or the check will show a false gap.</div>` : '';
-    auditHtml = `<div class="card"><h3>Balance check</h3>${pending}
+    auditHtml = `<div class="card"><h2>Balance check</h2>${pending}
       <div class="muted" style="font-size:13px">Your real balances right now, from each app.</div>
-      <div style="display:flex;gap:10px;margin-top:10px">
-        <input type="text" inputmode="decimal" id="auditRhb" aria-label="RHB balance" placeholder="RHB" autocomplete="off" style="flex:1;background:var(--fill)">
-        <input type="text" inputmode="decimal" id="auditTng" aria-label="TnG balance" placeholder="TnG" autocomplete="off" style="flex:1;background:var(--fill)"></div>
+      <div style="display:flex;gap:10px;margin-top:14px">
+        <div style="flex:1;min-width:0"><label class="fieldlabel stacked" for="auditRhb">RHB balance</label>
+          <input type="text" inputmode="decimal" id="auditRhb" placeholder="0.00" autocomplete="off" style="background:var(--fill)"></div>
+        <div style="flex:1;min-width:0"><label class="fieldlabel stacked" for="auditTng">TnG balance</label>
+          <input type="text" inputmode="decimal" id="auditTng" placeholder="0.00" autocomplete="off" style="background:var(--fill)"></div></div>
       <button class="btn" id="auditBtn">Check</button>
       <div id="auditOut"></div></div>`;
   }
 
-  html += searchHtml + covHtml + auditHtml;
-  html += `<details class="card fold" id="moreFold"${moreFoldOpen ? ' open' : ''}><summary>Settings and how it works</summary>
+  // Section labels (small, muted, not cards): the Import card above is the first group.
+  const group = (id, label, inner) => (inner ? `<div role="group" aria-labelledby="gl-${id}"><div class="grouplabel" id="gl-${id}">${label}</div>${inner}</div>` : '');
+  html = group('insights', 'Insights', html) + group('tools', 'Tools', searchHtml + covHtml + auditHtml);
+  html += `<div class="grouplabel" id="gl-settings">Settings</div><details class="card fold" id="moreFold"${moreFoldOpen ? ' open' : ''}><summary>Settings and how it works</summary>
     <div class="muted" style="font-size:13px;margin-top:14px">Quick add opens as</div>
     <div class="seg" style="margin-top:8px" role="group" aria-label="Quick add style">
       <button type="button" id="styleSheet" aria-pressed="${addAsSheet()}">Sheet over the screen</button>
@@ -1610,10 +1685,11 @@ function renderMore() {
     <div class="muted" style="font-size:13px;margin-top:18px">How the numbers work</div>
     <ul class="muted" style="font-size:13px;line-height:1.55;margin:6px 0 0;padding-left:18px">
     <li><b style="color:var(--text)">Still free to spend</b> &mdash; what&rsquo;s left across every budgeted envelope; the daily figure under it divides that by the days left this month (today included). An overspent envelope counts against the others.</li>
-    <li><b style="color:var(--text)">The jar</b> &mdash; filled to the share of this month&rsquo;s budget that is still left. It empties as you spend.</li>
+    <li><b style="color:var(--text)">The jar</b> &mdash; filled to the share of this month&rsquo;s budget that is still left, and labelled &ldquo;left&rdquo;. It empties as you spend.</li>
+    <li><b style="color:var(--text)">Budget bars</b> &mdash; each bar is what&rsquo;s left of that envelope: full means untouched, empty means nothing left. Orange means this month is heading over; an empty bar with a red tint and &ldquo;over&rdquo; means it already is. A paid bill sits empty at the bottom. The thin bars under Other spending are only relative to the largest.</li>
     <li><b style="color:var(--text)">Next payday</b> &mdash; counts down to the day of the month set above, from the date of the latest numbers.</li>
-    <li><b style="color:var(--text)">Tabung</b> &mdash; your savings pots. Travel Fund and the Emergency cushion take a target you set on this phone; the Buffer&rsquo;s target is its floor.</li>
-    <li><b style="color:var(--text)">Pace tick</b> &mdash; the small mark on a bar is where this month is heading; &ldquo;heading RM20 over&rdquo; means that projection passes the cap.</li>
+    <li><b style="color:var(--text)">Tabung</b> &mdash; your savings pots, with the total on Home. Each jar and bar fills toward the pot&rsquo;s target, in gold because it&rsquo;s money; a pot with no target shows a full, faded jar. Travel Fund and the Emergency cushion take a target you set on this phone; the Buffer&rsquo;s target is its floor.</li>
+    <li><b style="color:var(--text)">Pace tick</b> &mdash; the small mark on a bar is where it will be at month end if you keep this pace; at the left edge, with &ldquo;heading RM20 over&rdquo;, the projection passes the cap.</li>
     <li><b style="color:var(--text)">The rules</b> &mdash; keyword rules in the sheet&rsquo;s Rules tab pick a category from the merchant name; anything they miss waits in Review.</li>
     <li><b style="color:var(--text)">Buffer floor</b> &mdash; the cushion for one-off shocks (the worst single month seen); salary above plan refills it before anything else.</li></ul></details>`;
   html += `<div class="muted" style="text-align:center;margin-top:20px;font-size:12px">Updated ${esc(fmtUpdated(data.generatedAt))}</div>`;
@@ -1723,13 +1799,14 @@ function potCardHtml(p) {
        <div class="sub">${p.target ? `of ${fmt(p.target)}` : 'No target set'}${p.months !== undefined && p.months !== null ? ` &middot; &asymp; ${p.months.toFixed(1)} mo of core outflow` : ''}${p.balance < 0 ? ' &middot; below zero' : ''}</div>`
     : `<div class="sub" style="margin-top:4px">${esc(p.note)}</div>`;
   const pctNow = p.pct === null ? 0 : Math.round(p.pct);
+  const noTarget = known && p.pct === null; // holds money, nothing to measure it against
   const bar = known && p.target
-    ? `<div class="track lg" style="margin-top:14px" role="progressbar" aria-label="${esc(p.name)} toward its target" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pctNow}"><div class="fill" style="width:${barWidth(p.pct)}%;background:${potBarColor(p)}" data-w="1"></div></div>
+    ? `<div class="track lg" style="margin-top:14px" role="progressbar" aria-label="${esc(p.name)} toward its target" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pctNow}"><div class="fill" style="width:${barWidth(p.pct)}%;background:${POT_BAR}" data-w="1"></div></div>
        <div class="foot"><span${p.low ? ' style="color:var(--amber)"' : ''}>${p.reached ? 'Target reached' : `${fmt(p.toGo)} to go`}</span><span class="of">${pctNow}%</span></div>` : '';
-  const note = known && p.note ? `<div class="note">${esc(p.note)}</div>` : '';
+  const note = known && p.note ? `<div class="note"${p.low ? ' style="color:var(--amber)"' : ''}>${esc(p.note)}</div>` : '';
   const hasTarget = p.target !== null && (p.key === 'travel' || p.custom);
   const btn = p.editable ? `<button type="button" class="btn secondary" data-target="${p.key}">${hasTarget || (p.key === 'ef' && p.target) ? 'Change target' : 'Set a target'}</button>` : '';
-  return `<div class="card pot" data-pot="${p.key}"><div class="head">${jarSvg('jarPot-' + p.key, p.pct, { w: 56, label: known && p.pct !== null ? `${p.name} jar, ${pctNow} percent of target` : `${p.name} jar` })}
+  return `<div class="card pot" data-pot="${p.key}"><div class="head">${jarSvg('jarPot-' + p.key, p.pct, { w: 56, noTarget, label: known && p.pct !== null ? `${p.name} jar, ${pctNow} percent of target` : noTarget ? `${p.name} jar, no target set` : `${p.name} jar` })}
     <div style="min-width:0"><div class="nm">${esc(p.name)}</div>${heading}</div></div>${bar}${note}${btn}</div>`;
 }
 
@@ -1757,7 +1834,7 @@ function openTargetSheet(key) {
   const blurb = key === 'ef'
     ? `The default is 3 months of core outflow${p.defaultTarget ? ' (' + fmt(p.defaultTarget) + ')' : ''}. A target you set here replaces it.`
     : 'Your target stays on this phone.';
-  const sheet = mountSheet(`<div id="sheetTitle" style="font-size:17px;font-weight:800">${esc(p.name)} target</div>
+  const sheet = mountSheet(`<h2 id="sheetTitle" style="margin:0;font-size:17px;font-weight:800">${esc(p.name)} target</h2>
     <div class="muted" style="font-size:13px;margin-top:2px">${blurb}</div>
     <div class="fieldlabel" id="tgtLabel">Target (RM)</div>
     <div style="margin-top:14px"><input type="text" inputmode="decimal" id="tgtInput" aria-labelledby="tgtLabel" value="${custom ? esc(String(potTargets[key])) : ''}" placeholder="e.g. 5000" autocomplete="off" style="background:var(--fill);font-size:20px;font-weight:800"></div>
@@ -1777,7 +1854,11 @@ function openTargetSheet(key) {
 
 // Header controls: Hide amounts and Time. Both persist on this phone.
 function syncHeaderBtns() {
-  $('hideBtn').setAttribute('aria-pressed', String(hideOn));
+  // The eye names the action it will do; the .off class (not aria-pressed) swaps its icon.
+  const hb = $('hideBtn');
+  hb.classList.toggle('off', hideOn);
+  hb.setAttribute('aria-label', hideOn ? 'Show amounts' : 'Hide amounts');
+  hb.title = hideOn ? 'Show amounts' : 'Hide amounts';
   $('timeBtn').setAttribute('aria-pressed', String(timeMode()));
 }
 // Everything that draws money re-renders from the current snapshot (open sheets sit
@@ -1806,7 +1887,7 @@ function toggleTime() {
   if (data) renderOverview();
 }
 function openPaySheet() {
-  const sheet = mountSheet(`<div id="sheetTitle" style="font-size:17px;font-weight:800">Spending as days of your work</div>
+  const sheet = mountSheet(`<h2 id="sheetTitle" style="margin:0;font-size:17px;font-weight:800">Spending as days of your work</h2>
     <div class="muted" style="font-size:14px;margin-top:6px;line-height:1.45">Enter what you earn per hour. Spending then shows as time or days of your work (8-hour days). Your pay stays on this phone.</div>
     <div class="fieldlabel" id="payLabel">Pay per hour (RM)</div>
     <div style="margin-top:14px"><input type="text" inputmode="decimal" id="paySheetInput" aria-labelledby="payLabel" placeholder="e.g. 30" autocomplete="off" style="background:var(--fill);font-size:20px;font-weight:800"></div>
@@ -1845,16 +1926,16 @@ function renderReview() {
       <div style="font-size:17px;font-weight:700;margin-top:8px">Nothing to review</div>
       <div class="muted" style="font-size:14px;margin-top:4px">Every transaction is categorised &mdash; all clear to sync to Actual Budget.</div></div>`;
   } else {
-    html = `<div class="card list"><h3>
-      <span>Needs a category (${data.reviewTotal})</span>
-      ${list.length > 1 ? `<button type="button" id="selToggle" class="cardhead-btn">${reviewSelectMode ? 'Done' : 'Select'}</button>` : ''}</h3>` +
-      list.map((t, i) => `<div class="txn tappable" data-i="${i}" tabindex="0" ${reviewSelectMode
+    html = `<div class="card list"><h2>
+      <span>Needs a category</span>
+      ${list.length > 1 ? `<button type="button" id="selToggle" class="cardhead-btn">${reviewSelectMode ? 'Done' : 'Select'}</button>` : ''}</h2>` +
+      list.map((t, i) => `<div class="txn tappable wrap" data-i="${i}" tabindex="0" ${reviewSelectMode
           ? `role="checkbox" aria-checked="${reviewSel.has(t.id)}"` : 'role="button"'}>
         ${reviewSelectMode ? `<span class="selbox" aria-hidden="true"><span class="selmark${reviewSel.has(t.id) ? ' on' : ''}"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.4l2.6 2.6L11 4.4"/></svg></span></span>` : catIcon(suggestCategory(t) || t.category)}
         <div style="min-width:0;flex:1">
         <div class="m">${esc(t.merchant || '(no merchant)')}</div>
         <div class="sub">${esc(fmtDay(t.date))} &middot; ${esc(srcLabel(t.source))}${t.category === 'REVIEW' ? ' &middot; REVIEW' : ''}${(() => { const g = suggestCategory(t); return g ? ` &middot; <span style="color:var(--text);font-weight:600">maybe ${esc(g)}</span>` : ''; })()}</div></div>
-        <div class="val">${t.amountMYR === null ? '—' : fmt(t.amountMYR)}</div></div>`).join('') +
+        <div class="val">${t.amountMYR === null ? '—' : fmt(t.amountMYR)}</div>${reviewSelectMode ? '' : '<span class="chev" aria-hidden="true">&rsaquo;</span>'}</div>`).join('') +
       '</div>' +
       (reviewSelectMode && reviewSel.size
         ? `<button class="btn" id="batchBtn">Categorise ${reviewSel.size} selected&hellip;</button>`
@@ -1895,16 +1976,21 @@ function openSheet(txns) {
   // newly funded envelope becomes a chip before any row or rule uses it.
   const cats = pickableCats(true);
   const suggested = many ? null : suggestCategory(txns[0]);
+  const t0 = txns[0];
   const head = many
     ? `${txns.length} transactions`
-    : esc(txns[0].merchant || '(no merchant)');
+    : esc(t0.merchant || '(no merchant)');
+  const amount = many ? '' : `<div class="num" style="font-size:30px;font-weight:800;letter-spacing:-.6px;margin-top:4px${t0.amountMYR !== null && t0.amountMYR < 0 ? ';color:var(--green)' : ''}">${t0.amountMYR === null ? '&mdash;' : fmtSigned(t0.amountMYR)}</div>`;
   const sub = many
     ? 'one category for all of them'
-    : `${esc(fmtDay(txns[0].date))} &middot; ${txns[0].amountMYR === null ? 'no amount' : fmt(txns[0].amountMYR)} &middot; ${esc(srcLabel(txns[0].source))}`;
-  const sheet = mountSheet(`<div id="sheetTitle" style="font-size:17px;font-weight:700">${head}</div>
-    <div class="muted" style="font-size:13px;margin-top:2px">${sub}</div>
-    ${suggested ? `<div class="muted" style="font-size:12px;margin-top:10px">Suggested &mdash; this merchant is ${esc(suggested)} elsewhere</div>` : ''}
-    <div class="chips cats" id="catPick" role="group" aria-label="Category">${catChipsHtml(cats, topCats(suggested ? [suggested] : []), null)}</div>
+    : `${esc(fmtDay(t0.date))} &middot; ${esc(srcLabel(t0.source))}`;
+  // The suggestion comes first, as its own chip, labelled as a suggestion.
+  const suggChip = suggested
+    ? `<button type="button" class="sugg" data-c="${esc(suggested)}" aria-pressed="false" aria-label="${esc('Suggested: ' + suggested + '. This merchant is ' + suggested + ' elsewhere')}"><span class="ci" aria-hidden="true">${catOf(suggested)[0]}</span>Maybe ${esc(suggested)}</button>
+       <div class="chipsep" aria-hidden="true">Suggested &mdash; this merchant is ${esc(suggested)} elsewhere</div>` : '';
+  const sheet = mountSheet(`<h2 id="sheetTitle" style="margin:0;font-size:17px;font-weight:700">${head}</h2>${amount}
+    <div class="muted" style="font-size:13px;margin-top:${many ? 2 : 4}px">${sub}</div>
+    <div class="chips cats" id="catPick" role="group" aria-label="Category">${suggChip}${catChipsHtml(suggested ? cats.filter((c) => c !== suggested) : cats, topCats([]), null)}</div>
     <div class="muted" style="font-size:12px;margin-top:10px">New envelopes appear here once they&rsquo;re funded in Actual.</div>`, 'Cancel');
   const holder = sheet.querySelector('#catPick');
   wireMore(holder);
@@ -1984,6 +2070,7 @@ function closeSheet() {
   $('sheet').classList.add('hidden');
   $('app').inert = false;
   $('nav').inert = false;
+  syncSheetKeyboard(); // a closed sheet carries no keyboard inset
   const next = sheetOnClose;
   sheetOnClose = null;
   if (next) { next(); return; }
@@ -1991,6 +2078,36 @@ function closeSheet() {
   if (sheetReturnFocus && document.contains(sheetReturnFocus)) sheetReturnFocus.focus({ preventScroll: true });
   sheetReturnFocus = null;
 }
+
+// On-screen keyboard lift. Phones keep the layout viewport at full height when the keyboard
+// opens (only window.visualViewport shrinks), so a bottom sheet would sit BEHIND it, with its
+// Log button out of reach. The inset is how much of the layout viewport the keyboard covers:
+// layout height - visible height - how far the visible area has been panned down. Under ~80px
+// it is browser chrome (URL bar), not a keyboard. Pure, so it is tested.
+function kbInset(innerHeight, vvHeight, vvOffsetTop) {
+  const inset = Math.max(0, innerHeight - vvHeight - (vvOffsetTop || 0));
+  return inset >= 80 ? Math.round(inset) : 0;
+}
+// Applies the inset to the open sheet (--kb pads it up above the keyboard, --vvh caps its height
+// to what is visible, .kb drops the home-indicator padding). A closed sheet, no keyboard or no
+// visualViewport = every property removed, i.e. exactly the old behaviour.
+function syncSheetKeyboard() {
+  const sheet = $('sheet');
+  const vv = window.visualViewport;
+  if (!sheet) return;
+  const inset = vv && !sheet.classList.contains('hidden') ? kbInset(window.innerHeight, vv.height, vv.offsetTop) : 0;
+  if (inset) {
+    sheet.style.setProperty('--kb', inset + 'px');
+    sheet.style.setProperty('--vvh', Math.round(vv.height) + 'px');
+    sheet.classList.add('kb');
+  } else {
+    sheet.style.removeProperty('--kb');
+    sheet.style.removeProperty('--vvh');
+    sheet.classList.remove('kb');
+  }
+}
+const keyboardUp = () => !!window.visualViewport && !$('sheet').classList.contains('hidden') &&
+  kbInset(window.innerHeight, window.visualViewport.height, window.visualViewport.offsetTop) > 0;
 
 // iOS (especially standalone) keeps the visual viewport shrunk after the keyboard or a
 // prompt() closes, until a real scroll event fires - the fixed tab bar floats mid-screen
@@ -2012,14 +2129,17 @@ function updateBadge() {
   $('badge').classList.toggle('hidden', !n);
   $('tab-review').setAttribute('aria-label', n ? `Review, ${n} to categorise` : 'Review');
   const pill = $('statusPill');
-  // Only shown while something waits (nothing to say when it's clear).
-  if (n) { pill.className = 'pill bad'; pill.textContent = n + ' to review'; }
+  // Only shown while something waits (nothing to say when it's clear) and never on the Review
+  // tab itself, where the tab badge and the list already say it. The header row keeps the
+  // pill's height either way, so the title does not jump.
+  if (n) { pill.className = 'pill bad' + (tab === 'review' ? ' hidden' : ''); pill.textContent = n + ' to review'; }
   else { pill.className = 'pill good hidden'; pill.textContent = 'all clear'; }
   pill.setAttribute('aria-label', n ? `${n} to review — open Review` : 'All clear — open Review');
 }
 
 const TAB_TITLES = { overview: 'Spending', pots: 'Tabung', review: 'Review', add: 'Log spending', more: 'More' };
 function setTab(t) {
+  if (t !== tab) dismissActionToast(); // an Undo / rule offer belongs to the screen it was raised on
   tab = t;
   $('title').textContent = TAB_TITLES[t] || 'Spending';
   ['overview', 'pots', 'review', 'add', 'more'].forEach((v) => {
@@ -2027,6 +2147,8 @@ function setTab(t) {
     $('tab-' + v).classList.toggle('on', t === v);
     if (t === v) $('tab-' + v).setAttribute('aria-current', 'page'); else $('tab-' + v).removeAttribute('aria-current');
   });
+  updateBadge(); // the header pill hides on the Review tab
+  window.scrollTo(0, 0);
   healViewport();
 }
 
@@ -2082,10 +2204,12 @@ function openAddSheet() {
   mountSheet('<div id="addHost"></div>', 'Close');
   const host = $('addHost');
   host.appendChild($('addForm'));
+  host.appendChild($('addFoot')); // the pinned Log button (submits addForm via its form attribute)
   host.appendChild($('addHelp'));
   $('sheet').querySelector('.inner').setAttribute('aria-labelledby', 'addTitle');
   sheetOnClose = () => {
     $('view-add').appendChild($('addForm'));
+    $('view-add').appendChild($('addFoot'));
     $('view-add').appendChild($('addHelp'));
     // A repayment started from Owed and then abandoned must not leave the next
     // tired taxi logging as a repayment.
@@ -2462,6 +2586,7 @@ async function saveQuickAdd() {
     if (r.dedup) msg += ' (already logged)';
     const undoable = !!r.id && !r.dedup;
     if (addAsSheet()) closeAddSheet(); // first, so the toast sits at the bottom by the thumb
+    else setTab('overview');           // before the toast: switching tab dismisses an Undo toast
     toast(msg, undoable ? { label: 'Undo', run: async () => {
       try {
         const u = await undoQuickAdd(r.id);
@@ -2481,7 +2606,6 @@ async function saveQuickAdd() {
     $('addDate').value = localToday();
     showAddExtra(false);
     setAddMode('spend');
-    if (!addAsSheet()) setTab('overview');
     refresh();
   } catch (err) {
     toast('Failed: ' + friendly(err));
@@ -2620,11 +2744,19 @@ function boot() {
   // any visual-viewport resize settling (covers prompt(), rotation, keyboard).
   document.addEventListener('focusout', healViewport);
   if (window.visualViewport) {
-    let vvT;
+    let vvT, kbRaf = 0;
+    const lift = () => { // keyboard lift: once per frame, on resize AND scroll (iOS pans the visual viewport)
+      if (kbRaf) return;
+      kbRaf = requestAnimationFrame(() => { kbRaf = 0; syncSheetKeyboard(); });
+    };
     window.visualViewport.addEventListener('resize', () => {
+      lift();
       clearTimeout(vvT);
-      vvT = setTimeout(healViewport, 120);
+      // While the keyboard is legitimately up under a sheet there is nothing to heal (and the
+      // nudge would fight the lift); the resize that ends it heals as before.
+      vvT = setTimeout(() => { if (!keyboardUp()) healViewport(); }, 120);
     });
+    window.visualViewport.addEventListener('scroll', lift);
   }
   refresh();
 }
@@ -2637,5 +2769,6 @@ if (typeof module !== 'undefined') module.exports = {
   parseConnect, snapToday, staleCaptureText, todaySpend, paceColor, barColor, amountFlag, importFlag, flippable,
   monthItems, monthTotalItems, versusPrev, suggestCategory, topCats, canonCats, pickableCats, srcLabel, fmtUpdated,
   workDays, workTime, fmtDays, migratePay, resolveTheme, PREF, nextPayday, potsFor, fmtWhole, maskText,
+  budgetBar, jarWaterY, kbInset, fmtSigned,
   CANON_CATS, __setData: (d) => { data = d; }, __setHide: (v) => { hideOn = !!v; }
 };
