@@ -12,11 +12,11 @@
    Config { url, key } lives in localStorage only. ?demo=1 renders sample data.
    Snapshot `travelBalanceMYR` (number, may be negative, or null) feeds the Travel Fund pot; a
    backend that omits it still gives a fully working app. Phone-only settings (never sent
-   anywhere): hide amounts, Time mode + pay per working day, payday, pot targets. */
+   anywhere): hide amounts, Time mode + pay per hour, payday, pot targets. */
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
-const APP_VERSION = 32; // keep in step with index.html's app.js?v=
+const APP_VERSION = 33; // keep in step with index.html's app.js?v=
 // The backend address is fixed and not secret (auth lives in the key), so connecting
 // only truly requires the key itself.
 const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
@@ -113,14 +113,15 @@ const DEMO_OLDER = [
 ];
 
 // ---- Phone-only settings (localStorage, wrapped: iOS can deny it). Never sent anywhere.
-const PREF = { hide: 'autolog.hide', time: 'autolog.timeOn', pay: 'autolog.payPerDay', payday: 'autolog.payday', targets: 'autolog.potTargets' };
+const PREF = { hide: 'autolog.hide', time: 'autolog.timeOn', pay: 'autolog.payPerHour', payPerDayOld: 'autolog.payPerDay', theme: 'autolog.theme', payday: 'autolog.payday', targets: 'autolog.potTargets' };
 function prefGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
 function prefSet(k, v) {
   try { if (v === null || v === undefined) localStorage.removeItem(k); else localStorage.setItem(k, String(v)); } catch (e) { /* per-device nicety */ }
 }
 let hideOn = false;      // every ringgit amount shown as RM •••
 let timeOn = false;      // Time mode: the free amount as days of work
-let payPerDay = 0;       // RM per working day (0 = not set)
+let payPerHour = 0;      // RM per hour (0 = not set)
+let themeSetting = 'auto'; // 'auto' | 'light' | 'dark'
 let payday = 26;         // day of month
 let potTargets = {};     // { travel, ef } overrides, RM
 const DEFAULT_PAYDAY = 26;
@@ -133,12 +134,13 @@ const fmtWhole = (v) => (hideOn ? MASK : (v < 0 ? '-' : '') + 'RM' + grouped(Str
 // A stored string with amounts in it (the undo pill's text), masked at display time.
 const maskText = (s) => (hideOn ? String(s).replace(/-?RM[\d,]+(\.\d+)?/g, MASK) : s);
 
-// Time mode: money as days of work (pay per working day, 8-hour days). Pure.
-const WORK_MIN_PER_DAY = 480;
-function workDays(amount, pay) { return pay > 0 && isFinite(amount) ? amount / pay : NaN; }
-function workTime(amount, pay) {
-  if (!(pay > 0) || !isFinite(amount)) return '';
-  const days = amount / pay;
+// Time mode: money as time at work, from pay per HOUR. Pure.
+const WORK_HOURS_PER_DAY = 8; // the one working-day length: under it we show h/min, from it up days
+const WORK_MIN_PER_DAY = WORK_HOURS_PER_DAY * 60;
+function workDays(amount, payPerHour) { return payPerHour > 0 && isFinite(amount) ? amount / payPerHour / WORK_HOURS_PER_DAY : NaN; }
+function workTime(amount, payPerHour) {
+  if (!(payPerHour > 0) || !isFinite(amount)) return '';
+  const days = amount / payPerHour / WORK_HOURS_PER_DAY;
   const sign = days < 0 ? '-' : '';
   if (Math.abs(days) >= 1) return sign + Math.abs(days).toFixed(1) + ' days';
   const mins = Math.round(Math.abs(days) * WORK_MIN_PER_DAY);
@@ -146,9 +148,20 @@ function workTime(amount, pay) {
   const h = Math.floor(mins / 60), m = mins % 60;
   return sign + (m ? `${h} h ${m} min` : `${h} h`);
 }
+// One-time move from the old per-day setting: the hourly figure, or null when there is nothing to carry over.
+function migratePay(perHourRaw, perDayRaw) {
+  if (perHourRaw !== null && perHourRaw !== undefined) return null;
+  const d = parseFloat(perDayRaw);
+  return d > 0 ? Math.round(d / WORK_HOURS_PER_DAY * 100) / 100 : null;
+}
+// Appearance: the stored setting plus the phone's preference -> the theme to paint. Pure.
+function resolveTheme(setting, systemPrefersLight) {
+  if (setting === 'light' || setting === 'dark') return setting;
+  return systemPrefersLight ? 'light' : 'dark';
+}
 const fmtDays = (d) => (isFinite(d) ? d.toFixed(1) + ' days' : '');
 const workStr = (s) => (hideOn ? '•••' : s); // work time is amounts too: hidden with them
-const timeMode = () => timeOn && payPerDay > 0;
+const timeMode = () => timeOn && payPerHour > 0;
 
 // Next payday from the snapshot's own today (never the phone clock). A month shorter
 // than `day` pays on its last day. days: 0 = today.
@@ -207,8 +220,13 @@ function potsFor(d, targets) {
 function loadPrefs() {
   hideOn = prefGet(PREF.hide) === '1';
   timeOn = prefGet(PREF.time) === '1';
+  const moved = migratePay(prefGet(PREF.pay), prefGet(PREF.payPerDayOld));
+  if (moved !== null) prefSet(PREF.pay, moved);
+  if (prefGet(PREF.pay) !== null || moved !== null) prefSet(PREF.payPerDayOld, null);
   const pay = parseFloat(prefGet(PREF.pay));
-  payPerDay = pay > 0 ? pay : 0;
+  payPerHour = pay > 0 ? pay : 0;
+  const th = prefGet(PREF.theme);
+  themeSetting = th === 'light' || th === 'dark' ? th : 'auto';
   const pd = parseInt(prefGet(PREF.payday), 10);
   payday = pd >= 1 && pd <= 31 ? pd : DEFAULT_PAYDAY;
   potTargets = {};
@@ -253,6 +271,22 @@ function friendly(err) {
   if (/failed to fetch|networkerror|load failed|network/i.test(m)) return 'No connection — nothing changed. Try again.';
   if (/unexpected token|json/i.test(m)) return 'The server didn’t answer properly — try again in a minute.';
   return m;
+}
+// Appearance: resolve the setting, write data-theme (CSS holds the one copy of each token set)
+// and point both theme-color metas at the resolved ground colour.
+const lightQuery = () => (window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null);
+function applyTheme() {
+  const mq = lightQuery();
+  const root = document.documentElement;
+  root.setAttribute('data-theme', resolveTheme(themeSetting, !!(mq && mq.matches)));
+  const bg = getComputedStyle(root).getPropertyValue('--bg').trim();
+  if (bg) document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute('content', bg));
+}
+function watchSystemTheme() {
+  const mq = lightQuery();
+  if (!mq) return;
+  const onChange = () => { if (themeSetting === 'auto') applyTheme(); };
+  if (mq.addEventListener) mq.addEventListener('change', onChange); else if (mq.addListener) mq.addListener(onChange);
 }
 const reduceMotion = () => !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
@@ -706,7 +740,7 @@ function renderOverview() {
   const daysLeft = Math.max(1, data.daysInMonth - data.dayOfMonth + 1);
   const perDay = left / daysLeft;
   const tm = timeMode();
-  const W = (v) => workStr(workTime(v, payPerDay));
+  const W = (v) => workStr(workTime(v, payPerHour));
   // Today line. The hero's daily figure is computed AFTER today's spends, so it is
   // never compared to them directly: when today touched budgeted envelopes, say
   // what the day STARTED at, by undoing those spends with the hero's own sum
@@ -736,8 +770,8 @@ function renderOverview() {
   let hero;
   if (bCats.length) {
     const pct = totalBudget > 0 ? Math.max(0, Math.min(100, Math.round(left / totalBudget * 100))) : 0;
-    const heroAmt = tm ? workStr(fmtDays(workDays(left, payPerDay))) : fmt(left);
-    const heroSub = tm ? `of your work left &middot; ${workStr(fmtDays(workDays(budgetedSpent, payPerDay)))} spent`
+    const heroAmt = tm ? workStr(fmtDays(workDays(left, payPerHour))) : fmt(left);
+    const heroSub = tm ? `of your work left &middot; ${workStr(fmtDays(workDays(budgetedSpent, payPerHour)))} spent`
       : `${fmtWhole(budgetedSpent)} of ${fmtWhole(totalBudget)} spent`;
     const keep = `Keep to about ${tm ? W(perDay) + ' of work' : fmt(perDay)} a day for the ${plural(daysLeft, 'day')} left this month.`;
     let st;
@@ -849,7 +883,7 @@ function renderOverview() {
   view.innerHTML = html;
   animateFills('view-overview');
   if (firstPaint && !reduceMotion() && !hideOn && $('bigTotal')) {
-    if (bCats.length) { if (left > 0) countUp($('bigTotal'), left, tm ? (v) => workStr(fmtDays(workDays(v, payPerDay))) : fmt); }
+    if (bCats.length) { if (left > 0) countUp($('bigTotal'), left, tm ? (v) => workStr(fmtDays(workDays(v, payPerHour))) : fmt); }
     else if (data.totalMYR > 0) countUp($('bigTotal'), data.totalMYR);
   }
 
@@ -1553,11 +1587,17 @@ function renderMore() {
       <button type="button" id="styleSheet" aria-pressed="${addAsSheet()}">Sheet over the screen</button>
       <button type="button" id="styleTab" aria-pressed="${!addAsSheet()}">Its own tab</button></div>
     <div class="muted" style="font-size:12px;margin-top:8px">Sheet: the keypad comes up at once and the screen behind stays put. Switch back here any time.</div>
+    <div class="muted" style="font-size:13px;margin-top:18px">Appearance</div>
+    <div class="seg" style="margin-top:8px" role="group" aria-label="Appearance">
+      <button type="button" id="themeAuto" aria-pressed="${themeSetting === 'auto'}">Auto</button>
+      <button type="button" id="themeLight" aria-pressed="${themeSetting === 'light'}">Light</button>
+      <button type="button" id="themeDark" aria-pressed="${themeSetting === 'dark'}">Dark</button></div>
+    <div class="muted" style="font-size:12px;margin-top:8px">Auto follows your phone.</div>
     <div class="muted" style="font-size:13px;margin-top:18px" id="paydayLabel">Payday</div>
     <div style="margin-top:8px"><input type="text" inputmode="numeric" id="paydayInput" aria-labelledby="paydayLabel" value="${payday}" autocomplete="off" style="background:var(--fill)"></div>
     <div class="muted" style="font-size:12px;margin-top:8px">The day of the month you&rsquo;re paid, 1&ndash;31 (a shorter month uses its last day). Home counts down to it.</div>
-    <div class="muted" style="font-size:13px;margin-top:18px" id="payLabelSet">Pay per working day (RM)</div>
-    <div style="margin-top:8px"><input type="text" inputmode="decimal" id="payInput" aria-labelledby="payLabelSet" value="${payPerDay > 0 ? esc(String(payPerDay)) : ''}" placeholder="Not set" autocomplete="off" style="background:var(--fill)"></div>
+    <div class="muted" style="font-size:13px;margin-top:18px" id="payLabelSet">Pay per hour (RM)</div>
+    <div style="margin-top:8px"><input type="text" inputmode="decimal" id="payInput" aria-labelledby="payLabelSet" value="${payPerHour > 0 ? esc(String(payPerHour)) : ''}" placeholder="Not set" autocomplete="off" style="background:var(--fill)"></div>
     <div class="muted" style="font-size:12px;margin-top:8px">Used by the Time button to show spending as days of your work (8-hour days). Stays on this phone, never sent anywhere. Clear it to turn Time off.</div>
     <div class="muted" style="font-size:13px;margin-top:18px">How the numbers work</div>
     <ul class="muted" style="font-size:13px;line-height:1.55;margin:6px 0 0;padding-left:18px">
@@ -1605,6 +1645,13 @@ function renderMore() {
     $('styleTab').setAttribute('aria-pressed', String(v === 'tab'));
     toast(v === 'sheet' ? 'Quick add now opens as a sheet' : 'Quick add now has its own tab');
   }));
+  [['themeAuto', 'auto', 'Auto'], ['themeLight', 'light', 'Light'], ['themeDark', 'dark', 'Dark']].forEach(([id, v, label]) => $(id).addEventListener('click', () => {
+    themeSetting = v;
+    prefSet(PREF.theme, v);
+    applyTheme();
+    ['auto', 'light', 'dark'].forEach((k) => $('theme' + k[0].toUpperCase() + k.slice(1)).setAttribute('aria-pressed', String(k === v)));
+    toast('Appearance: ' + label);
+  }));
   $('paydayInput').addEventListener('change', () => {
     const raw = $('paydayInput').value.trim();
     const v = Number(raw);
@@ -1620,7 +1667,7 @@ function renderMore() {
   $('payInput').addEventListener('change', () => {
     const raw = $('payInput').value.trim();
     if (!raw) {
-      payPerDay = 0;
+      payPerHour = 0;
       timeOn = false;
       prefSet(PREF.pay, null);
       prefSet(PREF.time, '0');
@@ -1630,10 +1677,10 @@ function renderMore() {
     }
     const v = amountValue(raw);
     if (!(v > 0)) {
-      $('payInput').value = payPerDay > 0 ? String(payPerDay) : '';
+      $('payInput').value = payPerHour > 0 ? String(payPerHour) : '';
       return toast('Pay must be a number more than 0');
     }
-    payPerDay = v;
+    payPerHour = v;
     prefSet(PREF.pay, v);
     syncHeaderBtns();
     renderOverview();
@@ -1744,7 +1791,7 @@ function toggleHide() {
   toast(hideOn ? 'Amounts hidden' : 'Amounts shown');
 }
 function toggleTime() {
-  if (!(payPerDay > 0)) return openPaySheet();
+  if (!(payPerHour > 0)) return openPaySheet();
   timeOn = !timeOn;
   prefSet(PREF.time, timeOn ? '1' : '0');
   syncHeaderBtns();
@@ -1752,14 +1799,14 @@ function toggleTime() {
 }
 function openPaySheet() {
   const sheet = mountSheet(`<div id="sheetTitle" style="font-size:17px;font-weight:800">Spending as days of your work</div>
-    <div class="muted" style="font-size:14px;margin-top:6px;line-height:1.45">Shows your spending as days of your work. Your pay stays on this phone.</div>
-    <div class="fieldlabel" id="payLabel">Pay per working day (RM)</div>
-    <div style="margin-top:14px"><input type="text" inputmode="decimal" id="paySheetInput" aria-labelledby="payLabel" placeholder="e.g. 250" autocomplete="off" style="background:var(--fill);font-size:20px;font-weight:800"></div>
+    <div class="muted" style="font-size:14px;margin-top:6px;line-height:1.45">Enter what you earn per hour. Spending then shows as time or days of your work (8-hour days). Your pay stays on this phone.</div>
+    <div class="fieldlabel" id="payLabel">Pay per hour (RM)</div>
+    <div style="margin-top:14px"><input type="text" inputmode="decimal" id="paySheetInput" aria-labelledby="payLabel" placeholder="e.g. 30" autocomplete="off" style="background:var(--fill);font-size:20px;font-weight:800"></div>
     <button class="btn" id="paySave">Save</button>`, 'Cancel');
   const save = () => {
     const v = amountValue($('paySheetInput').value);
     if (!(v > 0)) return toast('Pay must be a number more than 0');
-    payPerDay = v;
+    payPerHour = v;
     timeOn = true;
     prefSet(PREF.pay, v);
     prefSet(PREF.time, '1');
@@ -2531,6 +2578,8 @@ function boot() {
   $('tab-add').addEventListener('click', openAdd);
   $('tab-more').addEventListener('click', () => setTab('more'));
   loadPrefs();
+  applyTheme();
+  watchSystemTheme();
   syncHeaderBtns();
   $('hideBtn').addEventListener('click', toggleHide);
   $('timeBtn').addEventListener('click', toggleTime);
@@ -2579,6 +2628,6 @@ if (typeof module !== 'undefined') module.exports = {
   fmt, amountValue, fmtDay, fmtCoverageDate, plural, esc, isoDayNum, friendly, TIMEOUT_MSG, WRITE_TIMEOUT_MSG,
   parseConnect, snapToday, staleCaptureText, todaySpend, paceColor, barColor, amountFlag, importFlag, flippable,
   monthItems, monthTotalItems, versusPrev, suggestCategory, topCats, canonCats, pickableCats, srcLabel, fmtUpdated,
-  workDays, workTime, fmtDays, nextPayday, potsFor, fmtWhole, maskText,
+  workDays, workTime, fmtDays, migratePay, resolveTheme, PREF, nextPayday, potsFor, fmtWhole, maskText,
   CANON_CATS, __setData: (d) => { data = d; }, __setHide: (v) => { hideOn = !!v; }
 };

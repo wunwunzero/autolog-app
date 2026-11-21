@@ -6,8 +6,18 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Autolog">
-<meta name="theme-color" content="#F3F7F4" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0D1411" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#0D1411">
+<script>
+  /* Runs before first paint: pick light/dark from the Appearance setting (or the
+     phone, when it is Auto) so the page never flashes the wrong theme, and give
+     the browser bar the matching ground colour straight away. */
+  try {
+    var t = localStorage.getItem('autolog.theme');
+    if (t !== 'light' && t !== 'dark') t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', t);
+    if (t === 'light') document.querySelector('meta[name="theme-color"]').setAttribute('content', '#F3F7F4');
+  } catch (e) { document.documentElement.setAttribute('data-theme', 'dark'); }
+</script>
 <title>Autolog</title>
 <link rel="preconnect" href="https://script.google.com">
 <link rel="preconnect" href="https://script.googleusercontent.com">
@@ -19,11 +29,11 @@
 <link rel="icon" href="icon-180.png">
 <style>
   /* Colour tokens ("the jar" look, v32): a mint palette, dark by default with a
-     light override; the app follows the phone's appearance setting. Semantic
+     light override on :root[data-theme="light"] (set by the head script / applyTheme from the Appearance setting). Semantic
      meaning is stable: --green good, --amber heading over, --red over, --blue
      link, --accent filled control (text on it is --accent-ink), --badge count
      badge. The -bar variants are fills; the plain ones are TEXT colours. */
-  :root { color-scheme: light dark;
+  :root { color-scheme: dark;
     --bg: #0D1411; --text: #E9F2ED; --muted: #A3B8AE; --fill: #2A3A34; --fill2: #34463F;
     --group: #17211D; --card-line: #26352F; --chip-line: #2E4A3F;
     --sheet: #17211D; --nav: #17211D; --nav-shadow: rgba(0,0,0,.5); --hair: #26352F; --input: #17211D; --scrim: rgba(0,0,0,.6);
@@ -38,8 +48,7 @@
     --c-gold: #ffd60a;
     --c-orange: #ff9f0a; --c-green: #30d158; --c-blue: #0a84ff; --c-cyan: #64d2ff; --c-pink: #ff375f; --c-purple: #bf5af2;
     --c-indigo: #5e5ce6; --c-gray: #98989d; --c-brown: #ac8e68; --c-mint: #63e6e2; --c-teal: #40c8e0; }
-  @media (prefers-color-scheme: light) {
-    :root { --bg: #F3F7F4; --text: #10231D; --muted: #4D6159; --fill: #E6EEEA; --fill2: #D5E2DB;
+  :root[data-theme="light"] { color-scheme: light; --bg: #F3F7F4; --text: #10231D; --muted: #4D6159; --fill: #E6EEEA; --fill2: #D5E2DB;
       --group: #FFFFFF; --card-line: #DFE9E4; --chip-line: #D5E2DB;
       --sheet: #FFFFFF; --nav: #FFFFFF; --nav-shadow: rgba(16,35,29,.12); --hair: #E3ECE7; --input: #FFFFFF; --scrim: rgba(16,35,29,.4);
       --toast: #10231D; --toast-ink: #FFFFFF; --toast-act: #8FD9B8; --skel-a: #E6EEEA; --skel-b: #F3F7F4; --tick: #10231D;
@@ -52,7 +61,6 @@
       --c-gold: #d4a000;
       --c-orange: #ff9500; --c-green: #34c759; --c-blue: #007aff; --c-cyan: #32ade6; --c-pink: #ff2d55; --c-purple: #af52de;
       --c-indigo: #5856d6; --c-gray: #8e8e93; --c-brown: #a2845e; --c-mint: #00c7be; --c-teal: #30b0c7; }
-  }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
     font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
@@ -413,6 +421,6 @@
   <div id="sheet" class="hidden"></div>
   <div id="toast" role="status" aria-live="polite"></div>
   <!-- bump ?v= on every app.js change: Safari/PWA caches are sticky -->
-  <script src="app.js?v=32"></script>
+  <script src="app.js?v=33"></script>
 </body>
 </html>

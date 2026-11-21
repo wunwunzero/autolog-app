@@ -421,21 +421,45 @@ t('fmtUpdated', () => {
 
 // ---------- Time mode (days of work) ----------
 t('workDays', () => {
-  eq(A.workDays(150, 300), 0.5);
-  eq(A.workDays(600, 300), 2);
+  eq(A.workDays(150, 37.5), 0.5);   // RM37.5 an hour, 8-hour day = RM300
+  eq(A.workDays(600, 37.5), 2);
   assert.ok(Number.isNaN(A.workDays(100, 0)));
   assert.ok(Number.isNaN(A.workDays(100, -5)));
 });
 t('workTime: minutes, hours, days', () => {
-  eq(A.workTime(0, 300), '0 min');
-  eq(A.workTime(22.5, 300), '36 min');      // 8-hour day: 300/480 = RM0.625 a minute
-  eq(A.workTime(87.5, 300), '2 h 20 min');
-  eq(A.workTime(75, 300), '2 h');
-  eq(A.workTime(360, 300), '1.2 days');
-  eq(A.workTime(300, 300), '1.0 days');     // a full day counts in days
+  eq(A.workTime(0, 37.5), '0 min');
+  eq(A.workTime(22.5, 37.5), '36 min');
+  eq(A.workTime(87.5, 37.5), '2 h 20 min');
+  eq(A.workTime(75, 37.5), '2 h');
+  eq(A.workTime(360, 37.5), '1.2 days');
+  eq(A.workTime(300, 37.5), '1.0 days');    // a full 8 hours counts in days
   eq(A.workTime(10, 0), '');
-  eq(A.workTime(NaN, 300), '');
-  eq(A.workTime(-87.5, 300), '-2 h 20 min');
+  eq(A.workTime(NaN, 37.5), '');
+  eq(A.workTime(-87.5, 37.5), '-2 h 20 min');
+});
+t('storage keys: the old per-day key is not the hourly key (a shared key wiped the pay on every launch)', () => {
+  assert.strictEqual(A.PREF.pay, 'autolog.payPerHour');
+  assert.strictEqual(A.PREF.payPerDayOld, 'autolog.payPerDay');
+  const keys = Object.values(A.PREF);
+  assert.strictEqual(new Set(keys).size, keys.length, 'every preference has its own key');
+});
+t('migratePay: old per-day figure becomes per-hour once', () => {
+  eq(A.migratePay(null, '300'), 37.5);
+  eq(A.migratePay(null, '250'), 31.25);
+  eq(A.migratePay(null, '100'), 12.5);
+  eq(A.migratePay(null, '333'), 41.63);
+  eq(A.migratePay('30', '300'), null);      // already migrated: keep the hourly figure
+  eq(A.migratePay(null, null), null);
+  eq(A.migratePay(null, 'abc'), null);
+  eq(A.migratePay(null, '0'), null);
+});
+t('resolveTheme', () => {
+  eq(A.resolveTheme('light', false), 'light');
+  eq(A.resolveTheme('dark', true), 'dark');
+  eq(A.resolveTheme('auto', true), 'light');
+  eq(A.resolveTheme('auto', false), 'dark');
+  eq(A.resolveTheme('bogus', true), 'light');
+  eq(A.resolveTheme(null, false), 'dark');
 });
 t('fmtDays', () => { eq(A.fmtDays(2.94), '2.9 days'); eq(A.fmtDays(NaN), ''); });
 
