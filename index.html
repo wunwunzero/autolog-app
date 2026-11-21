@@ -271,6 +271,9 @@
   .inrow.stat.amber .h, .inrow.stat.amber > svg { color: var(--amber); }
   .inrow.stat.red .h, .inrow.stat.red > svg { color: var(--red); }
   .inrow.stat.ok > svg { color: var(--icon); }
+  /* The daily figure on its own line: the number that decides today's purchase. */
+  .inrow.stat .day { font-size: 26px; font-weight: 800; letter-spacing: -.5px; line-height: 1.15; color: var(--text); margin-top: 3px; }
+  .inrow.stat .day span { font-size: 15px; font-weight: 700; letter-spacing: 0; color: var(--mint-text); }
   .inrow.stat .p { font-size: 14px; font-weight: 500; line-height: 1.4; color: var(--mint-body); margin-top: 2px; }
   .inrow.stat .tdy { font-size: 13px; font-weight: 600; color: var(--mint-text); margin-top: 6px; }
   .jar-lid { fill: var(--icon); }
@@ -421,6 +424,6 @@
   <div id="sheet" class="hidden"></div>
   <div id="toast" role="status" aria-live="polite"></div>
   <!-- bump ?v= on every app.js change: Safari/PWA caches are sticky -->
-  <script src="app.js?v=33"></script>
+  <script src="app.js?v=34"></script>
 </body>
 </html>

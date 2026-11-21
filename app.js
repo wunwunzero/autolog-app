@@ -16,7 +16,7 @@
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
-const APP_VERSION = 33; // keep in step with index.html's app.js?v=
+const APP_VERSION = 34; // keep in step with index.html's app.js?v=
 // The backend address is fixed and not secret (auth lives in the key), so connecting
 // only truly requires the key itself.
 const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
@@ -773,20 +773,28 @@ function renderOverview() {
     const heroAmt = tm ? workStr(fmtDays(workDays(left, payPerHour))) : fmt(left);
     const heroSub = tm ? `of your work left &middot; ${workStr(fmtDays(workDays(budgetedSpent, payPerHour)))} spent`
       : `${fmtWhole(budgetedSpent)} of ${fmtWhole(totalBudget)} spent`;
-    const keep = `Keep to about ${tm ? W(perDay) + ' of work' : fmt(perDay)} a day for the ${plural(daysLeft, 'day')} left this month.`;
+    // The daily figure is the number that decides today's purchase, so it stands
+    // on its own line in the status row (21 Nov 2026: it used to sit mid-sentence).
+    const dayAmt = tm ? W(perDay) : fmt(perDay);
+    const dayUnit = tm ? 'of work a day' : 'a day';
+    const forDays = `for the ${plural(daysLeft, 'day')} left this month`;
+    const keep = `Keep to about ${dayAmt} ${dayUnit} ${forDays}.`; // the spoken (aria) form
+    const dayHtml = `<div class="day">${dayAmt} <span>${dayUnit}</span></div>`;
     let st;
     if (left <= 0.005) {
-      st = { cls: 'red', icon: ICON_STOP, h: 'This month&rsquo;s budget is used up', p: overTotal > 0.005
-        ? `Envelopes are ${fmt(overTotal)} over in total &mdash; the sitting covers it from Buffer.` : 'Nothing is left to spend across the budgeted envelopes.' };
+      const used = overTotal > 0.005
+        ? `Envelopes are ${fmt(overTotal)} over in total &mdash; the sitting covers it from Buffer.` : 'Nothing is left to spend across the budgeted envelopes.';
+      st = { cls: 'red', icon: ICON_STOP, h: 'This month&rsquo;s budget is used up', day: '', p: used, say: used };
     } else if (overTotal > 0.005) {
-      st = { cls: 'amber', icon: ICON_WARN, h: 'Some envelopes are over', p: `Already ${fmt(overTotal)} lower for overspent envelopes. ${keep}` };
-    } else st = { cls: 'ok', icon: ICON_OK, h: 'You&rsquo;re on track', p: keep };
-    const heroLabel = plainText(`Still free to spend ${heroAmt}. ${heroSub}. ${pd ? 'Next payday ' + pdWord + ', ' + pd.label + '. ' : ''}${st.h}. ${st.p}. ${todayText}`);
+      const lower = `Already ${fmt(overTotal)} lower for overspent envelopes.`;
+      st = { cls: 'amber', icon: ICON_WARN, h: 'Some envelopes are over', day: dayHtml, p: `${forDays}. ${lower}`, say: `${lower} ${keep}` };
+    } else st = { cls: 'ok', icon: ICON_OK, h: 'You&rsquo;re on track', day: dayHtml, p: `${forDays}.`, say: keep };
+    const heroLabel = plainText(`Still free to spend ${heroAmt}. ${heroSub}. ${pd ? 'Next payday ' + pdWord + ', ' + pd.label + '. ' : ''}${st.h}. ${st.say} ${todayText}`);
     hero = `<div class="hero" role="group" aria-label="${esc(heroLabel)}"><div aria-hidden="true" style="display:contents">
       <div class="top">${jarSvg('jarHome', pct, { text: true, animate: firstPaint, label: `Jar ${pct} percent full` })}
         <div class="free"><div class="lab">Still free to spend</div><div id="bigTotal" style="font-size:${heroAmt.length >= 11 ? 24 : heroAmt.length >= 9 ? 28 : 34}px">${heroAmt}</div><div class="lab">${heroSub}</div></div></div>
       ${paydayRow}
-      <div class="inrow stat ${st.cls}">${st.icon}<div><div class="h">${st.h}</div><div class="p">${st.p}</div>${todayLine}</div></div></div></div>${staleLine}`;
+      <div class="inrow stat ${st.cls}">${st.icon}<div><div class="h">${st.h}</div>${st.day}<div class="p">${st.p}</div>${todayLine}</div></div></div></div>${staleLine}`;
   } else {
     // No budgets in the sheet (or an older one): just the month's total.
     hero = `<div class="hero"><div class="free"><div class="lab">Spent this month</div><div id="bigTotal">${fmt(data.totalMYR)}</div>
