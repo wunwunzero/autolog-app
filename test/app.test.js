@@ -419,5 +419,104 @@ t('fmtUpdated', () => {
   eq(A.fmtUpdated(null), '');
 });
 
+// ---------- Time mode (days of work) ----------
+t('workDays', () => {
+  eq(A.workDays(150, 300), 0.5);
+  eq(A.workDays(600, 300), 2);
+  assert.ok(Number.isNaN(A.workDays(100, 0)));
+  assert.ok(Number.isNaN(A.workDays(100, -5)));
+});
+t('workTime: minutes, hours, days', () => {
+  eq(A.workTime(0, 300), '0 min');
+  eq(A.workTime(22.5, 300), '36 min');      // 8-hour day: 300/480 = RM0.625 a minute
+  eq(A.workTime(87.5, 300), '2 h 20 min');
+  eq(A.workTime(75, 300), '2 h');
+  eq(A.workTime(360, 300), '1.2 days');
+  eq(A.workTime(300, 300), '1.0 days');     // a full day counts in days
+  eq(A.workTime(10, 0), '');
+  eq(A.workTime(NaN, 300), '');
+  eq(A.workTime(-87.5, 300), '-2 h 20 min');
+});
+t('fmtDays', () => { eq(A.fmtDays(2.94), '2.9 days'); eq(A.fmtDays(NaN), ''); });
+
+// ---------- Next payday ----------
+t('nextPayday counts from the snapshot date', () => {
+  const a = A.nextPayday('2026-11-21', 26);
+  eq(a.iso, '2026-11-26'); eq(a.days, 5); eq(a.label, '26 Nov'); eq(a.weekday, 'Thursday');
+  eq(A.nextPayday('2026-11-26', 26).days, 0);                 // payday itself = today
+  const b = A.nextPayday('2026-11-27', 26);
+  eq(b.iso, '2026-12-26'); eq(b.days, 29);
+  eq(A.nextPayday('2026-11-25', 26).days, 1);
+});
+t('nextPayday: short months use their last day, year rolls over', () => {
+  const f = A.nextPayday('2026-02-10', 31);
+  eq(f.iso, '2026-02-28'); eq(f.days, 18); eq(f.label, '28 Feb');
+  eq(A.nextPayday('2026-02-28', 31).days, 0);
+  eq(A.nextPayday('2026-04-30', 31).days, 0);                 // April has 30 days
+  const y = A.nextPayday('2026-12-28', 26);
+  eq(y.iso, '2027-01-26'); eq(y.days, 29);
+  eq(A.nextPayday('2028-01-30', 31).iso, '2028-01-31');       // leap-year Feb handled below
+  eq(A.nextPayday('2028-02-10', 31).iso, '2028-02-29');
+});
+t('nextPayday rejects bad input', () => {
+  eq(A.nextPayday(null, 26), null);
+  eq(A.nextPayday('garbage', 26), null);
+  eq(A.nextPayday('2026-11-21', 0), null);
+  eq(A.nextPayday('2026-11-21', 32), null);
+});
+
+// ---------- Tabung pots ----------
+const potData = { travelBalanceMYR: 1200, efBalanceMYR: 1500, efMonthlyBasisMYR: 2000, buffer: { balanceMYR: 1810, floorMYR: 2500 } };
+t('potsFor: the three pots in order with progress', () => {
+  const p = A.potsFor(potData, { travel: 5000 });
+  eq(p.map((x) => x.key).join(), 'travel,ef,buffer');
+  eq(p[0].balance, 1200); eq(p[0].target, 5000); eq(p[0].pct, 24); eq(p[0].toGo, 3800); eq(p[0].reached, false);
+  eq(p[1].target, 6000); eq(p[1].pct, 25); eq(p[1].toGo, 4500);          // default = 3 x monthly basis
+  eq(p[1].custom, false); eq(p[1].defaultTarget, 6000); eq(p[1].months, 0.75);
+  eq(p[2].target, 2500); eq(p[2].toGo, 690); eq(p[2].low, true); eq(p[2].editable, false);
+  assert.ok(/below the floor/.test(p[2].note));
+});
+t('potsFor: Travel Fund without a balance (older backend or null)', () => {
+  [{}, { travelBalanceMYR: null }, { travelBalanceMYR: 'x' }].forEach((d) => {
+    const p = A.potsFor(d, { travel: 5000 })[0];
+    eq(p.key, 'travel'); eq(p.balance, null); eq(p.pct, null); eq(p.toGo, null); eq(p.reached, false);
+    eq(p.note, 'Balance arrives after the next sync');
+    eq(p.target, 5000);
+  });
+  eq(A.potsFor({}, null).length, 1);                 // no EF / Buffer in the snapshot: only Travel
+});
+t('potsFor: no target, negative balance, reached target', () => {
+  const none = A.potsFor({ travelBalanceMYR: 300 }, {})[0];
+  eq(none.target, null); eq(none.pct, null); eq(none.toGo, null);
+  const neg = A.potsFor({ travelBalanceMYR: -80 }, { travel: 1000 })[0];
+  eq(neg.balance, -80); eq(neg.pct, 0); eq(neg.toGo, 1080);
+  const done = A.potsFor({ travelBalanceMYR: 1500 }, { travel: 1000 })[0];
+  eq(done.pct, 100); eq(done.toGo, 0); eq(done.reached, true);
+  eq(A.potsFor({ buffer: { balanceMYR: 3000, floorMYR: 2500 } }, {})[1].reached, true);
+});
+t('potsFor: Emergency cushion override wins; no basis means no default', () => {
+  const o = A.potsFor(potData, { ef: 10000 })[1];
+  eq(o.target, 10000); eq(o.custom, true); eq(o.pct, 15); eq(o.defaultTarget, 6000);
+  const nb = A.potsFor({ efBalanceMYR: 900 }, {})[1];
+  eq(nb.target, null); eq(nb.months, null); eq(nb.pct, null);
+  eq(A.potsFor({ efBalanceMYR: 900 }, { ef: 3000 })[1].pct, 30);
+});
+
+// ---------- Hide amounts ----------
+t('hide amounts masks fmt but not the number helpers', () => {
+  A.__setHide(true);
+  try {
+    eq(A.fmt(1234.5), 'RM •••');
+    eq(A.fmt(-5), 'RM •••');
+    eq(A.fmtWhole(3150), 'RM •••');
+    eq(A.maskText('+RM12.50 · Lunch'), '+RM ••• · Lunch');
+    eq(A.amountValue('12.50'), 12.5);               // typed input is never masked
+  } finally { A.__setHide(false); }
+  eq(A.fmt(1234.5), 'RM1,234.50');
+  eq(A.fmtWhole(3150), 'RM3,150');
+  eq(A.fmtWhole(1849.6), 'RM1,850');
+  eq(A.maskText('RM12.50 · Lunch'), 'RM12.50 · Lunch'); // visible: untouched
+});
+
 console.log(passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

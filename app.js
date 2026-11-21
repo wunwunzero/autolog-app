@@ -9,11 +9,14 @@
         (the `ruleKeyword` a categorize answer carried) as a rule; `search_rows` {q} —
         backend v48+ (snapshot `searchMonths`): search past months. Both answer
         'unauthorized' on an older backend.
-   Config { url, key } lives in localStorage only. ?demo=1 renders sample data. */
+   Config { url, key } lives in localStorage only. ?demo=1 renders sample data.
+   Snapshot `travelBalanceMYR` (number, may be negative, or null) feeds the Travel Fund pot; a
+   backend that omits it still gives a fully working app. Phone-only settings (never sent
+   anywhere): hide amounts, Time mode + pay per working day, payday, pot targets. */
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
-const APP_VERSION = 31; // keep in step with index.html's app.js?v=
+const APP_VERSION = 32; // keep in step with index.html's app.js?v=
 // The backend address is fixed and not secret (auth lives in the key), so connecting
 // only truly requires the key itself.
 const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
@@ -42,6 +45,7 @@ const DEMO = {
   coverage: { tng: '2026-08-14', hsbc: '2026-08-08', rhb: null, alipay: '2026-08-15' }, // hsbc 10 days behind generatedAt: shows the stale-capture line
   searchMonths: 7,
   efBalanceMYR: 2446.21,
+  travelBalanceMYR: 1200, // backend v49+ (an older backend omits the key: the Travel Fund card says so)
   efMonthlyBasisMYR: 6980,
   buffer: { balanceMYR: 1810, floorMYR: 2500 },
   audit: { cashMYR: 11431.4, autologMYR: -900.2, unbilledMYR: 543.6, asOf: '2026-08-18 07:31' },
@@ -108,7 +112,112 @@ const DEMO_OLDER = [
   { id: 'o6', date: '2026-03-14', merchant: 'Uniqlo Mid Valley', amountMYR: 129, category: 'Shopping', source: 'statement', fronted: null }
 ];
 
-const fmt = (v) => (v < 0 ? '-' : '') + 'RM' + Math.abs(v).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+// ---- Phone-only settings (localStorage, wrapped: iOS can deny it). Never sent anywhere.
+const PREF = { hide: 'autolog.hide', time: 'autolog.timeOn', pay: 'autolog.payPerDay', payday: 'autolog.payday', targets: 'autolog.potTargets' };
+function prefGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function prefSet(k, v) {
+  try { if (v === null || v === undefined) localStorage.removeItem(k); else localStorage.setItem(k, String(v)); } catch (e) { /* per-device nicety */ }
+}
+let hideOn = false;      // every ringgit amount shown as RM •••
+let timeOn = false;      // Time mode: the free amount as days of work
+let payPerDay = 0;       // RM per working day (0 = not set)
+let payday = 26;         // day of month
+let potTargets = {};     // { travel, ef } overrides, RM
+const DEFAULT_PAYDAY = 26;
+const MASK = 'RM •••';
+const grouped = (n) => n.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+const fmtRaw = (v) => (v < 0 ? '-' : '') + 'RM' + grouped(Math.abs(v).toFixed(2));
+// The one money formatter: honours Hide amounts. Never use it for text a person types into.
+const fmt = (v) => (hideOn ? MASK : fmtRaw(v));
+const fmtWhole = (v) => (hideOn ? MASK : (v < 0 ? '-' : '') + 'RM' + grouped(String(Math.round(Math.abs(v)))));
+// A stored string with amounts in it (the undo pill's text), masked at display time.
+const maskText = (s) => (hideOn ? String(s).replace(/-?RM[\d,]+(\.\d+)?/g, MASK) : s);
+
+// Time mode: money as days of work (pay per working day, 8-hour days). Pure.
+const WORK_MIN_PER_DAY = 480;
+function workDays(amount, pay) { return pay > 0 && isFinite(amount) ? amount / pay : NaN; }
+function workTime(amount, pay) {
+  if (!(pay > 0) || !isFinite(amount)) return '';
+  const days = amount / pay;
+  const sign = days < 0 ? '-' : '';
+  if (Math.abs(days) >= 1) return sign + Math.abs(days).toFixed(1) + ' days';
+  const mins = Math.round(Math.abs(days) * WORK_MIN_PER_DAY);
+  if (mins < 60) return sign + mins + ' min';
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return sign + (m ? `${h} h ${m} min` : `${h} h`);
+}
+const fmtDays = (d) => (isFinite(d) ? d.toFixed(1) + ' days' : '');
+const workStr = (s) => (hideOn ? '•••' : s); // work time is amounts too: hidden with them
+const timeMode = () => timeOn && payPerDay > 0;
+
+// Next payday from the snapshot's own today (never the phone clock). A month shorter
+// than `day` pays on its last day. days: 0 = today.
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+function nextPayday(todayIso, day) {
+  const m = String(todayIso || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m || !(day >= 1 && day <= 31)) return null;
+  let y = Number(m[1]), mo = Number(m[2]);
+  const d = Number(m[3]);
+  const dim = (yy, mm) => new Date(Date.UTC(yy, mm, 0)).getUTCDate(); // mm is 1-based
+  let pd = Math.min(day, dim(y, mo));
+  if (pd < d) { mo += 1; if (mo > 12) { mo = 1; y += 1; } pd = Math.min(day, dim(y, mo)); }
+  const iso = y + '-' + String(mo).padStart(2, '0') + '-' + String(pd).padStart(2, '0');
+  return { iso, days: Math.round(Date.UTC(y, mo - 1, pd) / 86400e3 - Date.UTC(Number(m[1]), Number(m[2]) - 1, d) / 86400e3),
+    label: pd + ' ' + MONTHS[mo - 1], weekday: WEEKDAYS[new Date(Date.UTC(y, mo - 1, pd)).getUTCDay()] };
+}
+
+// Savings pots (Tabung): pure, so it can be tested. Travel Fund always shows (its
+// balance is null until the backend sends travelBalanceMYR); the Emergency cushion
+// and Buffer only when the snapshot carries them. `targets` = the phone's overrides.
+function potsFor(d, targets) {
+  targets = targets || {};
+  d = d || {};
+  const num = (v) => typeof v === 'number' && isFinite(v);
+  const pot = (key, name, balance, target, extra) => {
+    const known = num(balance);
+    const hasT = num(target) && target > 0;
+    return Object.assign({ key, name, balance: known ? balance : null, target: hasT ? target : null,
+      pct: known && hasT ? Math.max(0, Math.min(100, balance / target * 100)) : null,
+      toGo: known && hasT ? Math.max(0, Math.round((target - balance) * 100) / 100) : null,
+      reached: known && hasT && balance >= target, note: '' }, extra);
+  };
+  const out = [];
+  out.push(pot('travel', 'Travel Fund', d.travelBalanceMYR, targets.travel, { editable: true,
+    note: num(d.travelBalanceMYR) ? '' : 'Balance arrives after the next sync' }));
+  if (num(d.efBalanceMYR)) {
+    const basis = d.efMonthlyBasisMYR > 0 ? d.efMonthlyBasisMYR : null;
+    const custom = targets.ef > 0;
+    const target = custom ? targets.ef : basis ? basis * 3 : null;
+    const tail = 'the envelope only — off-budget savings not counted';
+    out.push(pot('ef', 'Emergency cushion', d.efBalanceMYR, target, { editable: true, custom,
+      defaultTarget: basis ? basis * 3 : null, months: basis ? d.efBalanceMYR / basis : null,
+      note: (target ? (custom ? `toward your ${fmt(target)} target` : `toward a 3-month cushion (${fmt(target)})`) + ' · ' : '') + tail }));
+  }
+  const b = d.buffer;
+  if (b && num(b.balanceMYR)) {
+    const floor = b.floorMYR > 0 ? b.floorMYR : null;
+    const low = floor !== null && b.balanceMYR < floor;
+    out.push(pot('buffer', 'Buffer', b.balanceMYR, floor, { editable: false, low,
+      note: floor === null ? '' : low ? `${fmt(floor - b.balanceMYR)} below the floor — salary above plan refills it first`
+        : `${fmt(b.balanceMYR - floor)} above the floor · covers one-off shocks` }));
+  }
+  return out;
+}
+
+function loadPrefs() {
+  hideOn = prefGet(PREF.hide) === '1';
+  timeOn = prefGet(PREF.time) === '1';
+  const pay = parseFloat(prefGet(PREF.pay));
+  payPerDay = pay > 0 ? pay : 0;
+  const pd = parseInt(prefGet(PREF.payday), 10);
+  payday = pd >= 1 && pd <= 31 ? pd : DEFAULT_PAYDAY;
+  potTargets = {};
+  try {
+    const t = JSON.parse(prefGet(PREF.targets)) || {};
+    ['travel', 'ef'].forEach((k) => { if (typeof t[k] === 'number' && t[k] > 0) potTargets[k] = t[k]; });
+  } catch (e) { potTargets = {}; }
+}
+function saveTargets() { prefSet(PREF.targets, Object.keys(potTargets).length ? JSON.stringify(potTargets) : null); }
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 // Backend v47 always sends a `recap` key (possibly null); v46 has none. Everything
@@ -357,9 +466,9 @@ const CATS = {
 const catOf = (name) => CATS[name] || ['•', 'var(--c-gray)'];
 function catIcon(name, size) {
   const [icon, color] = catOf(name);
-  const px = size || 29;
+  const px = size || 36;
   const mix = color === 'var(--c-gray)' ? 30 : 18; // grey at 18% vanished on white
-  return `<span class="caticon" aria-hidden="true" style="width:${px}px;height:${px}px;background:color-mix(in srgb, ${color} ${mix}%, transparent)">${icon}</span>`;
+  return `<span class="caticon" aria-hidden="true" style="width:${px}px;height:${px}px;font-size:${Math.round(px * 0.5)}px;background:color-mix(in srgb, ${color} ${mix}%, transparent)">${icon}</span>`;
 }
 
 // Category chips (critique 29 Sep 2026): icon + name, the 4 likeliest first and
@@ -454,18 +563,17 @@ function barRow(name, right, pct, color, opts) {
 function animateFills(rootId) {
   requestAnimationFrame(() => requestAnimationFrame(() => {
     document.querySelectorAll('#' + rootId + ' .fill[data-w]').forEach((f) => { f.style.transform = 'scaleX(1)'; });
-    document.querySelectorAll('#' + rootId + ' circle[data-dash]').forEach((c) => {
-      c.setAttribute('stroke-dasharray', c.dataset.dash + ' 100');
-    });
+    document.querySelectorAll('#' + rootId + ' .jar-water[data-y]').forEach((w) => { w.style.transform = 'translateY(' + w.dataset.y + 'px)'; });
   }));
 }
 
 // Headline total counts up on the first paint of a session (ease-out, 500ms).
-function countUp(el, target) {
+function countUp(el, target, f) {
+  f = f || fmt;
   const start = performance.now();
   const step = (now) => {
     const p = Math.min(1, (now - start) / 500);
-    el.textContent = fmt(target * (1 - Math.pow(1 - p, 3)));
+    el.textContent = f(target * (1 - Math.pow(1 - p, 3)));
     if (p < 1) requestAnimationFrame(step);
   };
   requestAnimationFrame(step);
@@ -478,9 +586,9 @@ function renderSkeleton() {
     Array.from({ length: rows }, (_, i) =>
       `<div class="skel" style="height:14px;margin-top:16px;width:${88 - i * 9}%"></div>`).join('') + '</div>';
   $('view-overview').innerHTML =
-    `<div class="skel" style="width:56%;height:44px;margin-top:10px;border-radius:10px"></div>
-     <div class="skel" style="width:40%;height:12px;margin-top:10px"></div>` +
-    card(4) + card(3) + card(2);
+    `<div class="skel" style="height:236px;border-radius:28px;margin-top:16px"></div>
+     <div class="actions"><div class="skel" style="height:56px;border-radius:20px"></div><div class="skel" style="height:56px;border-radius:20px"></div></div>` +
+    card(3) + card(4) + card(2);
 }
 
 // "Today" for the hero lines comes from the snapshot itself (generatedAt, written
@@ -528,27 +636,77 @@ function todaySpend() {
   return { any, spent: Math.round(spent * 100) / 100, budgeted: Math.round(budgeted * 100) / 100 };
 }
 
+// Inline icons for the Home cards (stroke = currentColor, so they follow the tokens).
+const ICON = (inner, w) => `<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w || 2}" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
+const ICON_CAL = ICON('<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18"/>');
+const ICON_PLUS = ICON('<path d="M12 5v14M5 12h14"/>', 2.2);
+const ICON_SHOTS = ICON('<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-8 9"/>');
+const ICON_OK = ICON('<circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.8 2.8L16 9.5"/>');
+const ICON_WARN = ICON('<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5M12 16h.01"/>');
+const ICON_STOP = ICON('<circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/>');
+const plainText = (h) => String(h).replace(/<[^>]*>/g, '').replace(/&middot;/g, '.').replace(/&mdash;/g, '-').replace(/&rsquo;/g, "'").replace(/&[a-z]+;/g, ' ').replace(/\s+\./g, '.').replace(/\.{2,}/g, '.').replace(/\s+/g, ' ').trim();
+
+// The jar: a glass jar filled to `pct` (0-100) in the water colour. Drawn from tokens
+// via classes (no colour attributes); `id` must be unique per jar (the clipPath). With
+// opts.animate the water rises from empty on the next frame (animateFills).
+function jarSvg(id, pct, opts) {
+  opts = opts || {};
+  const w = opts.w || 104;
+  const p = pct === null || pct === undefined ? 0 : Math.max(0, Math.min(100, Math.round(pct)));
+  const y = 88 - 88 * p / 100;
+  const start = opts.animate && !reduceMotion() ? 88 : y;
+  return `<svg class="jar" role="img" aria-label="${esc(opts.label || ('Jar ' + p + ' percent full'))}" width="${w}" height="${Math.round(w * 120 / 104)}" viewBox="0 0 104 120">
+    <defs><clipPath id="${esc(id)}"><rect x="12" y="26" width="80" height="88" rx="20"/></clipPath></defs>
+    <rect class="jar-lid" x="32" y="6" width="40" height="14" rx="5"/>
+    <rect class="jar-glass" x="12" y="26" width="80" height="88" rx="20"/>
+    <g clip-path="url(#${esc(id)})"><rect class="jar-water" x="12" y="26" width="80" height="88" data-y="${y}" style="transform:translateY(${start}px)"/></g>
+    <rect class="jar-line" x="12" y="26" width="80" height="88" rx="20"/>
+    ${opts.text ? `<text class="jar-pct" x="52" y="66">${p}%</text>` : ''}</svg>`;
+}
+const potBarColor = (p) => (p.reached ? 'var(--gold)' : p.low ? 'var(--amber-bar)' : 'var(--savebar)');
+const barWidth = (pct) => Math.max(2, Math.min(100, Math.round(pct)));
+// A budget bar's fill: the status colours are TEXT tokens, bars have their own.
+const BAR_OF = { 'var(--red)': 'var(--red-bar)', 'var(--amber)': 'var(--amber-bar)' };
+const barFill = (c) => BAR_OF[c] || c;
+
+// One summary row of the Tabung card on Home (balance known only). Whole ringgit:
+// with sen, "Emergency cushion RM2,446.21 of RM20,940.00" wrapped onto three lines
+// at phone width; the Tabung tab shows the exact figures.
+function potRowHtml(p) {
+  return `<div class="potrow"><div class="l"><span>${esc(p.name)}</span><span${p.balance < 0 ? ' style="color:var(--red)"' : ''}>${fmtWhole(p.balance)}${p.target
+    ? ` <span class="of">${p.reached ? 'full' : 'of ' + fmtWhole(p.target)}</span>` : ''}</span></div>${p.target
+    ? `<div class="track lg" aria-hidden="true"><div class="fill" style="width:${barWidth(p.pct)}%;background:${potBarColor(p)}" data-w="1"></div></div>` : ''}</div>`;
+}
+
+function openAdd() { if (addAsSheet()) openAddSheet(); else { setTab('add'); window.scrollTo(0, 0); } }
+
 function renderOverview() {
   const budgets = data.budgets || {};
   const byCat = data.byCat || {};
   const bCats = Object.keys(budgets);
   const firstPaint = !renderOverview._painted;
   renderOverview._painted = true;
-  // Hero: safe to spend today = what's left across the budgeted envelopes ÷ days
-  // remaining (today included). Truthful before AND after a sitting's sweep —
-  // the caps mirror Actual's real capacity. Monthly spend drops to a sub-line.
-  // An overspent envelope counts AGAINST the rest (29 Sep 2026, user decision):
+  // Hero: "still free to spend" = what's left across the budgeted envelopes. An
+  // overspent envelope counts AGAINST the rest (29 Sep 2026, user decision):
   // covering it at the sitting takes money from the others, so the hero must too.
+  // The daily figure (÷ days remaining, today included) sits in the status block.
   let rawLeft = 0;
   let overTotal = 0;
+  let totalBudget = 0;
+  let budgetedSpent = 0;
   bCats.forEach((c) => {
-    const d = budgets[c] - (byCat[c] || 0);
+    const sp = byCat[c] || 0;
+    const d = budgets[c] - sp;
     rawLeft += d;
+    totalBudget += budgets[c];
+    budgetedSpent += sp;
     if (d < -0.005) overTotal -= d;
   });
   const left = Math.max(0, rawLeft);
   const daysLeft = Math.max(1, data.daysInMonth - data.dayOfMonth + 1);
   const perDay = left / daysLeft;
+  const tm = timeMode();
+  const W = (v) => workStr(workTime(v, payPerDay));
   // Today line. The hero's daily figure is computed AFTER today's spends, so it is
   // never compared to them directly: when today touched budgeted envelopes, say
   // what the day STARTED at, by undoing those spends with the hero's own sum
@@ -559,32 +717,55 @@ function renderOverview() {
   if (tdy) {
     if (!tdy.any) todayText = 'Nothing logged today yet';
     else if (bCats.length && tdy.budgeted > 0.005) {
-      todayText = `Today ${fmt(tdy.spent)} &middot; started the day at ${fmt(Math.max(0, rawLeft + tdy.budgeted) / daysLeft)}`;
-    } else todayText = `Today ${fmt(tdy.spent)} spent`;
+      const start = Math.max(0, rawLeft + tdy.budgeted) / daysLeft;
+      todayText = tm ? `Today ${W(tdy.spent)} of work &middot; started the day at ${W(start)}`
+        : `Today ${fmt(tdy.spent)} &middot; started the day at ${fmt(start)}`;
+    } else todayText = tm ? `Today ${W(tdy.spent)} of work` : `Today ${fmt(tdy.spent)} spent`;
   }
-  const todayLine = todayText ? `<div class="muted" style="font-size:13px;margin-top:3px">${todayText}</div>` : '';
+  const todayLine = todayText ? `<div class="tdy">${todayText}</div>` : '';
   const stale = staleCaptureText();
-  const staleLine = stale ? `<div class="flag" id="staleFlag" role="button" tabindex="0" aria-label="${esc(stale + '. Open More to import')}">${esc(stale)} &rsaquo;</div>` : '';
-  const heroLabel = `${fmt(perDay)} a day safe to spend. ${fmt(left)} left for ${plural(daysLeft, 'day')} including today.` +
-    (overTotal > 0.005 ? ` ${fmt(overTotal)} over in some envelopes.` : '') +
-    (todayText ? ' ' + todayText.replace(/&middot;/g, '.') + '.' : '');
-  let html = bCats.length
-    ? `<div role="group" aria-label="${esc(heroLabel)}"><div aria-hidden="true">
-      <div style="margin-top:6px;display:flex;align-items:baseline;gap:8px">
-        <div id="bigTotal" style="font-size:46px;font-weight:800;letter-spacing:-1.2px;color:${perDay < 20 ? 'var(--amber)' : 'var(--text)'}">${fmt(perDay)}</div>
-        <div class="muted" style="font-size:17px;font-weight:600">/ day</div></div>
-      <div style="font-size:15px;font-weight:600;margin-top:1px">safe to spend</div>
-      <div class="muted" style="font-size:13px;margin-top:3px">${fmt(left)} left &middot; ${daysLeft} day${daysLeft === 1 ? '' : 's'} incl. today &middot; ${fmt(data.totalMYR)} spent this month</div>
-      ${todayLine}
-      ${overTotal > 0.005 ? `<div style="font-size:13px;margin-top:3px;color:var(--red)">${left <= 0.005
-        ? `envelopes are ${fmt(overTotal)} over in total &mdash; the sitting covers it from Buffer`
-        : `already ${fmt(overTotal)} lower for overspent envelopes`}</div>` : ''}</div></div>${staleLine}`
-    : `<div id="bigTotal" style="font-size:44px;font-weight:800;letter-spacing:-1px;margin-top:6px">${fmt(data.totalMYR)}</div>
-      <div class="muted" style="font-size:13px;margin-top:2px">spent this month &middot; day ${data.dayOfMonth} of ${data.daysInMonth}</div>${todayLine}${staleLine}`;
+  const staleLine = stale ? `<div class="flag" id="staleFlag" role="button" tabindex="0" style="display:flex;align-items:center;min-height:44px;margin-top:12px" aria-label="${esc(stale + '. Open More to import')}">${esc(stale)} &rsaquo;</div>` : '';
+
+  // Next payday, counted from the snapshot's own today.
+  const pd = snapToday() ? nextPayday(snapToday(), payday) : null;
+  const pdWord = pd ? (pd.days === 0 ? 'today' : pd.days === 1 ? 'tomorrow' : `in ${pd.days} days`) : '';
+  const paydayRow = pd ? `<div class="inrow"><div class="tile">${ICON_CAL}</div>
+    <div class="grow"><div class="small">Next payday</div><div class="big">${pdWord}</div></div>
+    <div class="right"><div class="d">${esc(pd.label)}</div><div class="small">${esc(pd.weekday)}</div></div></div>` : '';
+
+  let hero;
+  if (bCats.length) {
+    const pct = totalBudget > 0 ? Math.max(0, Math.min(100, Math.round(left / totalBudget * 100))) : 0;
+    const heroAmt = tm ? workStr(fmtDays(workDays(left, payPerDay))) : fmt(left);
+    const heroSub = tm ? `of your work left &middot; ${workStr(fmtDays(workDays(budgetedSpent, payPerDay)))} spent`
+      : `${fmtWhole(budgetedSpent)} of ${fmtWhole(totalBudget)} spent`;
+    const keep = `Keep to about ${tm ? W(perDay) + ' of work' : fmt(perDay)} a day for the ${plural(daysLeft, 'day')} left this month.`;
+    let st;
+    if (left <= 0.005) {
+      st = { cls: 'red', icon: ICON_STOP, h: 'This month&rsquo;s budget is used up', p: overTotal > 0.005
+        ? `Envelopes are ${fmt(overTotal)} over in total &mdash; the sitting covers it from Buffer.` : 'Nothing is left to spend across the budgeted envelopes.' };
+    } else if (overTotal > 0.005) {
+      st = { cls: 'amber', icon: ICON_WARN, h: 'Some envelopes are over', p: `Already ${fmt(overTotal)} lower for overspent envelopes. ${keep}` };
+    } else st = { cls: 'ok', icon: ICON_OK, h: 'You&rsquo;re on track', p: keep };
+    const heroLabel = plainText(`Still free to spend ${heroAmt}. ${heroSub}. ${pd ? 'Next payday ' + pdWord + ', ' + pd.label + '. ' : ''}${st.h}. ${st.p}. ${todayText}`);
+    hero = `<div class="hero" role="group" aria-label="${esc(heroLabel)}"><div aria-hidden="true" style="display:contents">
+      <div class="top">${jarSvg('jarHome', pct, { text: true, animate: firstPaint, label: `Jar ${pct} percent full` })}
+        <div class="free"><div class="lab">Still free to spend</div><div id="bigTotal" style="font-size:${heroAmt.length >= 11 ? 24 : heroAmt.length >= 9 ? 28 : 34}px">${heroAmt}</div><div class="lab">${heroSub}</div></div></div>
+      ${paydayRow}
+      <div class="inrow stat ${st.cls}">${st.icon}<div><div class="h">${st.h}</div><div class="p">${st.p}</div>${todayLine}</div></div></div></div>${staleLine}`;
+  } else {
+    // No budgets in the sheet (or an older one): just the month's total.
+    hero = `<div class="hero"><div class="free"><div class="lab">Spent this month</div><div id="bigTotal">${fmt(data.totalMYR)}</div>
+      <div class="lab">day ${data.dayOfMonth} of ${data.daysInMonth}</div></div>${paydayRow}
+      ${todayText ? `<div class="inrow stat ok"><div><div class="p" style="margin:0">${todayText}</div></div></div>` : ''}</div>${staleLine}`;
+  }
+  let html = hero + `<div class="actions">
+    <button type="button" class="abtn gold" id="logBtn">${ICON_PLUS}Log spending</button>
+    <button type="button" class="abtn mintb" id="shotsBtn">${ICON_SHOTS}Screenshots</button></div>`;
 
   const undo = pendingUndo();
   if (undo) {
-    html += `<button class="btn secondary" id="undoBtn" style="margin-top:14px">&#x21a9;&#xfe0e; Undo last add &mdash; ${esc(undo.text)}</button>`;
+    html += `<button class="btn secondary" id="undoBtn" style="margin-top:16px">&#x21a9;&#xfe0e; Undo last add &mdash; ${esc(maskText(undo.text))}</button>`;
   }
 
   // Follow-ups the app can't do itself (a removed import that had already
@@ -598,6 +779,13 @@ function renderOverview() {
   }
 
   if (data.recap && data.dayOfMonth <= 7) html += recapEntryHtml();
+
+  // Tabung summary: only pots whose balance is known; no card when none is.
+  const pots = potsFor(data, potTargets).filter((p) => p.balance !== null);
+  if (pots.length) {
+    html += `<div class="card"><h3><span>Tabung</span><button type="button" class="cardhead-btn" id="seeAllPots">See all</button></h3>` +
+      pots.map(potRowHtml).join('') + `</div>`;
+  }
 
   if (bCats.length) {
     const rows = bCats.map((c) => {
@@ -628,7 +816,7 @@ function renderOverview() {
         // One neutral tint while on track (29 Sep 2026, user choice): category
         // colours stay on the icon tiles, so amber and red on a bar only ever
         // mean "heading over" and "over".
-        const fill = over ? 'var(--red)' : status !== 'var(--green)' ? status : 'var(--bar)';
+        const fill = over ? 'var(--red-bar)' : status !== 'var(--green)' ? barFill(status) : 'var(--bar)';
         return barRow(x.c, right, Math.max(2, Math.min(100, Math.round(x.r * 100))), fill, opts);
       }).join('') + `</div>`;
   }
@@ -638,7 +826,7 @@ function renderOverview() {
   if (others.length) {
     const max = Math.max(others[0].s, 0.01);
     // These bars are relative to the biggest row (no cap to measure against) — say so.
-    html += `<div class="card list"><h3><span>${bCats.length ? 'Other spending' : 'Spending'}</span><span style="font-size:12px">bars relative to the largest</span></h3>` +
+    html += `<div class="card list"><h3><span>${bCats.length ? 'Other spending' : 'Spending'}</span><span class="hnote">bars relative to the largest</span></h3>` +
       others.map((x) => barRow(x.c, fmt(x.s), Math.max(2, Math.round(x.s / max * 100)), 'var(--bar)', { cat: x.c })).join('') +
       '</div>';
   }
@@ -658,10 +846,17 @@ function renderOverview() {
     (data.recent || []).map((t, i) => txnRow(t, 'data-ri="' + i + '"')).join('') +
     `</div><div class="muted" style="text-align:center;margin-top:20px;font-size:12px">Updated ${esc(fmtUpdated(data.generatedAt))}</div>`;
   const view = $('view-overview');
-  view.classList.toggle('firstpaint', firstPaint); // card entrance stagger, first load only
   view.innerHTML = html;
   animateFills('view-overview');
-  if (firstPaint && !reduceMotion()) { const target = bCats.length ? perDay : data.totalMYR; if (target > 0) countUp($('bigTotal'), target); }
+  if (firstPaint && !reduceMotion() && !hideOn && $('bigTotal')) {
+    if (bCats.length) { if (left > 0) countUp($('bigTotal'), left, tm ? (v) => workStr(fmtDays(workDays(v, payPerDay))) : fmt); }
+    else if (data.totalMYR > 0) countUp($('bigTotal'), data.totalMYR);
+  }
+
+  $('logBtn').addEventListener('click', openAdd);
+  $('shotsBtn').addEventListener('click', () => { setTab('more'); window.scrollTo(0, 0); }); // the import card is the first thing there
+  const seeAll = $('seeAllPots');
+  if (seeAll) seeAll.addEventListener('click', () => { setTab('pots'); window.scrollTo(0, 0); });
 
   view.querySelectorAll('.barrow[data-cat]').forEach((el) => {
     el.addEventListener('click', () => openCategorySheet(el.dataset.cat));
@@ -1075,7 +1270,7 @@ async function notReal(t, after) {
     if (!r.ok) throw new Error(r.error || 'rejected');
     if (r.inActual) {
       addActualTodo(t);
-      toast('Removed — also delete it in Actual (listed on Overview)');
+      toast('Removed — also delete it in Actual (listed on Home)');
     } else toast('Removed');
     if (after) after();
     refresh();
@@ -1301,10 +1496,11 @@ function runAudit() {
     <div class="muted" style="font-size:12px;margin-top:6px">Actual figures as of ${esc(a.asOf || 'the last sync')} &mdash; anything paid since then shows up as a gap.</div></div>`;
 }
 
-// More tab (27 Sep 2026): the monthly/occasional cards, off the daily Overview —
-// search, the month-end balance check, and the savings pots.
-// Order (Oct 2026 tidy): recap, spending by month, Emergency Fund, Buffer; then the
-// tools (search, coverage, balance check); then one folded Settings row.
+// More tab (27 Sep 2026): the monthly/occasional cards, off the daily Home —
+// search and the month-end balance check. The savings pots (Emergency cushion, Buffer)
+// moved to the Tabung tab in v32.
+// Order: recap, spending by month; then the tools (search, coverage, balance check);
+// then one folded Settings row.
 // Each card below is built into its own variable and assembled at the end.
 let moreFoldOpen = false; // the Settings disclosure's state survives re-renders
 function renderMore() {
@@ -1333,38 +1529,6 @@ function renderMore() {
   const monthChartItems = monthTotalItems();
   const monthChart = colChartHtml('monthChart', monthChartItems);
   if (monthChart) html += `<div class="card"><h3>Spending by month</h3>${monthChart}</div>`;
-  // Emergency Fund progress (bridge-mirrored daily; older backends omit the field).
-  // The bar shows progress toward a soft 3-month cushion of CORE OUTFLOW (loan,
-  // bills, living envelopes — the backend's efMonthlyBasisMYR). Budgets-tab caps
-  // were the wrong denominator: they omit the loan and include savings pots.
-  if (typeof data.efBalanceMYR === 'number') {
-    const basis = data.efMonthlyBasisMYR > 0 ? data.efMonthlyBasisMYR : null;
-    const months = basis ? data.efBalanceMYR / basis : null;
-    const goalPct = months !== null ? Math.min(100, months / 3 * 100) : 0;
-    html += `<div class="card"><h3>Emergency Fund</h3>
-      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:12px">
-        <div style="font-size:24px;font-weight:800;letter-spacing:-.5px">${fmt(data.efBalanceMYR)}</div>
-        ${months !== null ? `<div class="muted" style="font-size:13px;font-weight:600">&asymp; ${months.toFixed(1)} mo of core outflow</div>` : ''}</div>
-      ${months !== null ? `<div class="track" style="margin-top:10px" role="progressbar" aria-label="Emergency Fund toward a 3-month cushion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(goalPct)}"><div class="fill" style="width:${Math.max(2, goalPct)}%;background:var(--blue)" data-w="1"></div></div>
-      <div class="muted" style="font-size:12px;margin-top:7px">toward a 3-month cushion (${fmt(basis * 3)}) &middot; the envelope only &mdash; off-budget savings not counted</div>` : ''}</div>`;
-  }
-
-  // Buffer vs its floor (bridge-mirrored daily; floor defaults to RM2,500 — the
-  // worst single-month shock seen). Refilled by salary above plan, never swept.
-  if (data.buffer && typeof data.buffer.balanceMYR === 'number') {
-    const b = data.buffer;
-    const ok = b.balanceMYR >= b.floorMYR;
-    const pct = b.floorMYR > 0 ? Math.max(2, Math.min(100, Math.round(b.balanceMYR / b.floorMYR * 100))) : 100;
-    html += `<div class="card"><h3>Buffer</h3>
-      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:12px">
-        <div style="font-size:24px;font-weight:800;letter-spacing:-.5px">${fmt(b.balanceMYR)}</div>
-        <div class="muted" style="font-size:13px;font-weight:600">floor ${fmt(b.floorMYR)}</div></div>
-      <div class="track" style="margin-top:10px" role="progressbar" aria-label="Buffer against its floor" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><div class="fill" style="width:${pct}%;background:${ok ? 'var(--green)' : 'var(--amber)'}" data-w="1"></div></div>
-      <div style="font-size:12px;margin-top:7px;color:${ok ? 'var(--muted)' : 'var(--amber)'}">${ok
-        ? `${fmt(b.balanceMYR - b.floorMYR)} above the floor &middot; covers one-off shocks`
-        : `${fmt(b.floorMYR - b.balanceMYR)} below the floor &mdash; salary above plan refills it first`}</div></div>`;
-  }
-
   // Phone audit: expected real RHB + TnG = Cash + Autolog (the sum doesn't change
   // when you settle) + card taps not yet billed. The typed balance never leaves
   // the phone and isn't stored.
@@ -1389,9 +1553,18 @@ function renderMore() {
       <button type="button" id="styleSheet" aria-pressed="${addAsSheet()}">Sheet over the screen</button>
       <button type="button" id="styleTab" aria-pressed="${!addAsSheet()}">Its own tab</button></div>
     <div class="muted" style="font-size:12px;margin-top:8px">Sheet: the keypad comes up at once and the screen behind stays put. Switch back here any time.</div>
+    <div class="muted" style="font-size:13px;margin-top:18px" id="paydayLabel">Payday</div>
+    <div style="margin-top:8px"><input type="text" inputmode="numeric" id="paydayInput" aria-labelledby="paydayLabel" value="${payday}" autocomplete="off" style="background:var(--fill)"></div>
+    <div class="muted" style="font-size:12px;margin-top:8px">The day of the month you&rsquo;re paid, 1&ndash;31 (a shorter month uses its last day). Home counts down to it.</div>
+    <div class="muted" style="font-size:13px;margin-top:18px" id="payLabelSet">Pay per working day (RM)</div>
+    <div style="margin-top:8px"><input type="text" inputmode="decimal" id="payInput" aria-labelledby="payLabelSet" value="${payPerDay > 0 ? esc(String(payPerDay)) : ''}" placeholder="Not set" autocomplete="off" style="background:var(--fill)"></div>
+    <div class="muted" style="font-size:12px;margin-top:8px">Used by the Time button to show spending as days of your work (8-hour days). Stays on this phone, never sent anywhere. Clear it to turn Time off.</div>
     <div class="muted" style="font-size:13px;margin-top:18px">How the numbers work</div>
     <ul class="muted" style="font-size:13px;line-height:1.55;margin:6px 0 0;padding-left:18px">
-    <li><b style="color:var(--text)">Safe to spend</b> &mdash; what&rsquo;s left across every budgeted envelope, divided by the days left this month (today included). An overspent envelope counts against the others.</li>
+    <li><b style="color:var(--text)">Still free to spend</b> &mdash; what&rsquo;s left across every budgeted envelope; the daily figure under it divides that by the days left this month (today included). An overspent envelope counts against the others.</li>
+    <li><b style="color:var(--text)">The jar</b> &mdash; filled to the share of this month&rsquo;s budget that is still left. It empties as you spend.</li>
+    <li><b style="color:var(--text)">Next payday</b> &mdash; counts down to the day of the month set above, from the date of the latest numbers.</li>
+    <li><b style="color:var(--text)">Tabung</b> &mdash; your savings pots. Travel Fund and the Emergency cushion take a target you set on this phone; the Buffer&rsquo;s target is its floor.</li>
     <li><b style="color:var(--text)">Pace tick</b> &mdash; the small mark on a bar is where this month is heading; &ldquo;heading RM20 over&rdquo; means that projection passes the cap.</li>
     <li><b style="color:var(--text)">The rules</b> &mdash; keyword rules in the sheet&rsquo;s Rules tab pick a category from the merchant name; anything they miss waits in Review.</li>
     <li><b style="color:var(--text)">Buffer floor</b> &mdash; the cushion for one-off shocks (the worst single month seen); salary above plan refills it before anything else.</li></ul></details>`;
@@ -1402,7 +1575,7 @@ function renderMore() {
   // A refresh re-renders everything here, and it fires exactly when the user comes
   // back from a bank app with a balance to type: carry the typed text, a showing
   // verdict and the focus/caret across the re-render.
-  const KEEP = ['searchBox', 'auditRhb', 'auditTng'];
+  const KEEP = ['searchBox', 'auditRhb', 'auditTng', 'paydayInput', 'payInput'];
   const kept = {};
   KEEP.forEach((id) => { if ($(id)) kept[id] = $(id).value; });
   const q = kept.searchBox || '';
@@ -1432,6 +1605,40 @@ function renderMore() {
     $('styleTab').setAttribute('aria-pressed', String(v === 'tab'));
     toast(v === 'sheet' ? 'Quick add now opens as a sheet' : 'Quick add now has its own tab');
   }));
+  $('paydayInput').addEventListener('change', () => {
+    const raw = $('paydayInput').value.trim();
+    const v = Number(raw);
+    if (!raw || !Number.isInteger(v) || v < 1 || v > 31) {
+      $('paydayInput').value = payday;
+      return toast('Payday is a day of the month, 1 to 31');
+    }
+    payday = v;
+    prefSet(PREF.payday, v);
+    renderOverview();
+    toast(`Payday set to day ${v} of the month`);
+  });
+  $('payInput').addEventListener('change', () => {
+    const raw = $('payInput').value.trim();
+    if (!raw) {
+      payPerDay = 0;
+      timeOn = false;
+      prefSet(PREF.pay, null);
+      prefSet(PREF.time, '0');
+      syncHeaderBtns();
+      renderOverview();
+      return toast('Pay cleared — Time is off');
+    }
+    const v = amountValue(raw);
+    if (!(v > 0)) {
+      $('payInput').value = payPerDay > 0 ? String(payPerDay) : '';
+      return toast('Pay must be a number more than 0');
+    }
+    payPerDay = v;
+    prefSet(PREF.pay, v);
+    syncHeaderBtns();
+    renderOverview();
+    toast('Saved on this phone');
+  });
   const searchBox = $('searchBox');
   if (searchBox) {
     searchBox.value = q;
@@ -1448,6 +1655,121 @@ function renderMore() {
     el.focus({ preventScroll: true });
     try { if (focused.start !== null && focused.start !== undefined) el.setSelectionRange(focused.start, focused.end); } catch (e) { /* type=search can refuse */ }
   }
+}
+
+// Tabung tab: the three savings pots, each a card with a small jar. Targets for the
+// Travel Fund and the Emergency cushion are set on this phone (potTargets); the
+// Buffer's target is its floor. A backend without travelBalanceMYR (key missing) or
+// with null says "Balance arrives after the next sync" and draws no bar.
+function potCardHtml(p) {
+  const known = p.balance !== null;
+  const heading = known
+    ? `<div class="bal"${p.balance < 0 ? ' style="color:var(--red)"' : ''}>${fmt(p.balance)}</div>
+       <div class="sub">${p.target ? `of ${fmt(p.target)}` : 'No target set'}${p.months !== undefined && p.months !== null ? ` &middot; &asymp; ${p.months.toFixed(1)} mo of core outflow` : ''}${p.balance < 0 ? ' &middot; below zero' : ''}</div>`
+    : `<div class="sub" style="margin-top:4px">${esc(p.note)}</div>`;
+  const pctNow = p.pct === null ? 0 : Math.round(p.pct);
+  const bar = known && p.target
+    ? `<div class="track lg" style="margin-top:14px" role="progressbar" aria-label="${esc(p.name)} toward its target" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pctNow}"><div class="fill" style="width:${barWidth(p.pct)}%;background:${potBarColor(p)}" data-w="1"></div></div>
+       <div class="foot"><span${p.low ? ' style="color:var(--amber)"' : ''}>${p.reached ? 'Target reached' : `${fmt(p.toGo)} to go`}</span><span class="of">${pctNow}%</span></div>` : '';
+  const note = known && p.note ? `<div class="note">${esc(p.note)}</div>` : '';
+  const hasTarget = p.target !== null && (p.key === 'travel' || p.custom);
+  const btn = p.editable ? `<button type="button" class="btn secondary" data-target="${p.key}">${hasTarget || (p.key === 'ef' && p.target) ? 'Change target' : 'Set a target'}</button>` : '';
+  return `<div class="card pot" data-pot="${p.key}"><div class="head">${jarSvg('jarPot-' + p.key, p.pct, { w: 56, label: known && p.pct !== null ? `${p.name} jar, ${pctNow} percent of target` : `${p.name} jar` })}
+    <div style="min-width:0"><div class="nm">${esc(p.name)}</div>${heading}</div></div>${bar}${note}${btn}</div>`;
+}
+
+function renderPots() {
+  const view = $('view-pots');
+  if (!view) return;
+  if (!data) {
+    view.innerHTML = `<div class="card" style="text-align:center;padding:30px 16px">
+      <div style="font-size:17px;font-weight:800">Your savings pots</div>
+      <div class="muted" style="font-size:14px;margin-top:6px">Travel Fund, Emergency cushion and Buffer appear here once your numbers load.</div></div>`;
+    return;
+  }
+  view.innerHTML = potsFor(data, potTargets).map(potCardHtml).join('') +
+    `<div class="muted" style="text-align:center;margin-top:20px;font-size:12px">Updated ${esc(fmtUpdated(data.generatedAt))}</div>`;
+  animateFills('view-pots');
+  view.querySelectorAll('button[data-target]').forEach((b) => b.addEventListener('click', () => openTargetSheet(b.dataset.target)));
+}
+
+// Set / change / remove a pot's target (stored on this phone). The input is what the
+// person types: never masked.
+function openTargetSheet(key) {
+  const p = potsFor(data, potTargets).find((x) => x.key === key);
+  if (!p || !p.editable) return;
+  const custom = potTargets[key] > 0;
+  const blurb = key === 'ef'
+    ? `The default is 3 months of core outflow${p.defaultTarget ? ' (' + fmt(p.defaultTarget) + ')' : ''}. A target you set here replaces it.`
+    : 'Your target stays on this phone.';
+  const sheet = mountSheet(`<div id="sheetTitle" style="font-size:17px;font-weight:800">${esc(p.name)} target</div>
+    <div class="muted" style="font-size:13px;margin-top:2px">${blurb}</div>
+    <div class="fieldlabel" id="tgtLabel">Target (RM)</div>
+    <div style="margin-top:14px"><input type="text" inputmode="decimal" id="tgtInput" aria-labelledby="tgtLabel" value="${custom ? esc(String(potTargets[key])) : ''}" placeholder="e.g. 5000" autocomplete="off" style="background:var(--fill);font-size:20px;font-weight:800"></div>
+    <button class="btn" id="tgtSave">Save target</button>
+    ${custom ? `<button class="btn quiet" id="tgtClear">${key === 'ef' ? 'Use the default' : 'Remove target'}</button>` : ''}`, 'Cancel');
+  const done = (msg) => { saveTargets(); closeSheet(); renderPots(); renderOverview(); toast(msg); };
+  sheet.querySelector('#tgtSave').addEventListener('click', () => {
+    const v = amountValue($('tgtInput').value);
+    if (!(v > 0)) return toast('Target must be a number more than 0');
+    potTargets[key] = v;
+    done(`${p.name} target saved`);
+  });
+  const clear = sheet.querySelector('#tgtClear');
+  if (clear) clear.addEventListener('click', () => { delete potTargets[key]; done(key === 'ef' ? 'Back to the default target' : `${p.name} target removed`); });
+  $('tgtInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); sheet.querySelector('#tgtSave').click(); } });
+}
+
+// Header controls: Hide amounts and Time. Both persist on this phone.
+function syncHeaderBtns() {
+  $('hideBtn').setAttribute('aria-pressed', String(hideOn));
+  $('timeBtn').setAttribute('aria-pressed', String(timeMode()));
+}
+// Everything that draws money re-renders from the current snapshot (open sheets sit
+// behind an inert page, so a toggle never happens under one).
+function renderAll() {
+  if (!data) return;
+  renderOverview();
+  renderPots();
+  renderMore();
+  renderReview();
+  fillNameChips();
+  updateBadge();
+}
+function toggleHide() {
+  hideOn = !hideOn;
+  prefSet(PREF.hide, hideOn ? '1' : '0');
+  syncHeaderBtns();
+  renderAll();
+  toast(hideOn ? 'Amounts hidden' : 'Amounts shown');
+}
+function toggleTime() {
+  if (!(payPerDay > 0)) return openPaySheet();
+  timeOn = !timeOn;
+  prefSet(PREF.time, timeOn ? '1' : '0');
+  syncHeaderBtns();
+  if (data) renderOverview();
+}
+function openPaySheet() {
+  const sheet = mountSheet(`<div id="sheetTitle" style="font-size:17px;font-weight:800">Spending as days of your work</div>
+    <div class="muted" style="font-size:14px;margin-top:6px;line-height:1.45">Shows your spending as days of your work. Your pay stays on this phone.</div>
+    <div class="fieldlabel" id="payLabel">Pay per working day (RM)</div>
+    <div style="margin-top:14px"><input type="text" inputmode="decimal" id="paySheetInput" aria-labelledby="payLabel" placeholder="e.g. 250" autocomplete="off" style="background:var(--fill);font-size:20px;font-weight:800"></div>
+    <button class="btn" id="paySave">Save</button>`, 'Cancel');
+  const save = () => {
+    const v = amountValue($('paySheetInput').value);
+    if (!(v > 0)) return toast('Pay must be a number more than 0');
+    payPerDay = v;
+    timeOn = true;
+    prefSet(PREF.pay, v);
+    prefSet(PREF.time, '1');
+    closeSheet();
+    syncHeaderBtns();
+    if (data) renderOverview();
+    toast('Time is on — amounts show as days of your work');
+  };
+  sheet.querySelector('#paySave').addEventListener('click', save);
+  $('paySheetInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
 }
 
 // Batch selection state for the Review tab: "Select" flips the list into
@@ -1635,14 +1957,17 @@ function updateBadge() {
   $('badge').classList.toggle('hidden', !n);
   $('tab-review').setAttribute('aria-label', n ? `Review, ${n} to categorise` : 'Review');
   const pill = $('statusPill');
+  // Only shown while something waits (nothing to say when it's clear).
   if (n) { pill.className = 'pill bad'; pill.textContent = n + ' to review'; }
-  else { pill.className = 'pill good'; pill.textContent = 'all clear'; }
+  else { pill.className = 'pill good hidden'; pill.textContent = 'all clear'; }
   pill.setAttribute('aria-label', n ? `${n} to review — open Review` : 'All clear — open Review');
 }
 
+const TAB_TITLES = { overview: 'Spending', pots: 'Tabung', review: 'Review', add: 'Log spending', more: 'More' };
 function setTab(t) {
   tab = t;
-  ['overview', 'review', 'add', 'more'].forEach((v) => {
+  $('title').textContent = TAB_TITLES[t] || 'Spending';
+  ['overview', 'pots', 'review', 'add', 'more'].forEach((v) => {
     $('view-' + v).classList.toggle('hidden', t !== v);
     $('tab-' + v).classList.toggle('on', t === v);
     if (t === v) $('tab-' + v).setAttribute('aria-current', 'page'); else $('tab-' + v).removeAttribute('aria-current');
@@ -2067,7 +2392,8 @@ async function saveQuickAdd() {
   try {
     const r = await quickAdd(fields);
     if (!r.ok) throw new Error(r.error || 'rejected');
-    const amtText = fields.currency === 'MYR' ? fmt(value) : fields.currency + ' ' + amount;
+    const amtText = fields.currency === 'MYR' ? fmt(value) : fields.currency + ' ' + (hideOn ? '•••' : amount);
+    const amtRaw = fields.currency === 'MYR' ? fmtRaw(value) : fields.currency + ' ' + amount; // the undo pill masks at display time
     // The toast answers the question that prompted the log ("is Transport still
     // OK?") from the numbers already on screen, and carries Undo inline; the
     // Overview pill stays as the 15-minute fallback.
@@ -2090,7 +2416,7 @@ async function saveQuickAdd() {
       } catch (err) { toast('Undo failed: ' + friendly(err)); }
       refresh();
     } } : null);
-    if (undoable && !isDemo()) rememberLastAdd(r.id, `${paidback ? '+' : ''}${amtText} · ${merchant}`);
+    if (undoable && !isDemo()) rememberLastAdd(r.id, `${paidback ? '+' : ''}${amtRaw} · ${merchant}`);
     $('addMerchant').value = '';
     $('addAmount').value = '';
     $('addNote').value = '';
@@ -2144,6 +2470,7 @@ async function refresh() {
     data = fresh;
     $('month').textContent = data.month;
     renderOverview();
+    renderPots();
     renderMore();
     renderReview();
     fillAddChips();
@@ -2200,8 +2527,14 @@ function boot() {
   $('nav').classList.remove('hidden');
   $('tab-overview').addEventListener('click', () => setTab('overview'));
   $('tab-review').addEventListener('click', () => setTab('review'));
-  $('tab-add').addEventListener('click', () => (addAsSheet() ? openAddSheet() : setTab('add')));
+  $('tab-pots').addEventListener('click', () => setTab('pots'));
+  $('tab-add').addEventListener('click', openAdd);
   $('tab-more').addEventListener('click', () => setTab('more'));
+  loadPrefs();
+  syncHeaderBtns();
+  $('hideBtn').addEventListener('click', toggleHide);
+  $('timeBtn').addEventListener('click', toggleTime);
+  renderPots(); // an empty state until the first snapshot lands
   $('tab-refresh').addEventListener('click', () => { toast('Refreshing…'); refresh(); });
   $('addDate').value = localToday();
   $('addDate').max = localToday(); // a spend can't be in the future
@@ -2246,5 +2579,6 @@ if (typeof module !== 'undefined') module.exports = {
   fmt, amountValue, fmtDay, fmtCoverageDate, plural, esc, isoDayNum, friendly, TIMEOUT_MSG, WRITE_TIMEOUT_MSG,
   parseConnect, snapToday, staleCaptureText, todaySpend, paceColor, barColor, amountFlag, importFlag, flippable,
   monthItems, monthTotalItems, versusPrev, suggestCategory, topCats, canonCats, pickableCats, srcLabel, fmtUpdated,
-  CANON_CATS, __setData: (d) => { data = d; }
+  workDays, workTime, fmtDays, nextPayday, potsFor, fmtWhole, maskText,
+  CANON_CATS, __setData: (d) => { data = d; }, __setHide: (v) => { hideOn = !!v; }
 };
