@@ -285,6 +285,13 @@ t('jarSvg: decorative hides from VoiceOver; tone and mark classes; default outpu
   const d = A.jarSvg('x', 50, { decorative: true });
   assert.ok(d.includes('aria-hidden="true"') && !d.includes('role=') && !d.includes('aria-label'));
   assert.ok(A.jarSvg('x', 50, { tone: 'warn' }).includes('class="jar-water warn"'));
+  // the water is a group (fill rect + a darker surface line), translated as one inside the clip
+  const g = A.jarSvg('x', 50);
+  const m = g.match(/<g class="jar-water" data-y="([\d.]+)" style="transform:translateY\(([\d.]+)px\)"><rect x="12" y="26" width="80" height="88"\/><rect class="jar-surface" x="12" y="26" width="80" height="4"\/><\/g>/);
+  assert.ok(m, 'water group with a surface line');
+  assert.ok(g.indexOf('clip-path="url(#x)"') < g.indexOf('jar-water') && g.indexOf('jar-water') < g.indexOf('jar-surface') && g.indexOf('jar-surface') < g.indexOf('class="jar-line"'));
+  assert.ok(A.jarSvg('x', 0).includes('data-y="88"')); // 0%: group sits fully below the clip, so the 4-unit line is clipped too
+  assert.ok(A.jarSvg('x', 50, { noTarget: true }).includes('class="jar-water idle"'));
   const o = A.jarSvg('x', 0, { tone: 'over', mark: 'over' });
   assert.ok(o.includes('<svg class="jar over"') && o.includes('d="M52 50v26M52 88v.5"'));
   const p = A.jarSvg('x', 0, { tone: 'paid', mark: 'paid' });
@@ -677,7 +684,11 @@ t('potsFor: the three pots in order with progress', () => {
   eq(p[1].target, 6000); eq(p[1].pct, 25); eq(p[1].toGo, 4500);          // default = 3 x monthly basis
   eq(p[1].custom, false); eq(p[1].defaultTarget, 6000); eq(p[1].months, 0.75);
   eq(p[2].target, 2500); eq(p[2].toGo, 690); eq(p[2].low, true); eq(p[2].editable, false);
-  assert.ok(/below the floor/.test(p[2].note));
+  eq(p[2].floor, true); eq(p[2].tone, 'warn');
+  eq(p[0].line, '24% of RM5,000 \u00B7 RM3,800.00 to go');
+  eq(p[1].line, '25% of RM6,000 \u00B7 RM4,500.00 to go');
+  assert.ok(!/envelope|core outflow/.test(p.map((x) => x.note).join('|')));
+  assert.ok(/this pot only/.test(p[1].note) && /0\.8 months of your usual spending/.test(p[1].note));
 });
 t('potsFor: Travel Fund without a balance (older backend or null)', () => {
   [{}, { travelBalanceMYR: null }, { travelBalanceMYR: 'x' }].forEach((d) => {
@@ -696,6 +707,28 @@ t('potsFor: no target, negative balance, reached target', () => {
   const done = A.potsFor({ travelBalanceMYR: 1500 }, { travel: 1000 })[0];
   eq(done.pct, 100); eq(done.toGo, 0); eq(done.reached, true);
   eq(A.potsFor({ buffer: { balanceMYR: 3000, floorMYR: 2500 } }, {})[1].reached, true);
+});
+t('potsFor: Buffer is a floor: below it warns with no percent line, above it is plain', () => {
+  const low = A.potsFor({ buffer: { balanceMYR: 1810, floorMYR: 2500 } }, {})[1];
+  eq(low.floor, true); eq(low.tone, 'warn'); eq(low.low, true);
+  eq(low.line, 'RM690.00 below its RM2,500 floor');
+  assert.ok(!/%|to go/.test(low.line));
+  assert.ok(Math.abs(low.pct - 72.4) < 1e-9);
+  const hi = A.potsFor({ buffer: { balanceMYR: 3000, floorMYR: 2500 } }, {})[1];
+  eq(hi.floor, true); eq(hi.tone, 'ok'); eq(hi.low, false); eq(hi.pct, 100);
+  eq(hi.line, 'RM500.00 above its RM2,500 floor');
+  eq(A.potsFor({ buffer: { balanceMYR: 2500, floorMYR: 2500 } }, {})[1].line, 'At its RM2,500 floor');
+  const nf = A.potsFor({ buffer: { balanceMYR: 900 } }, {})[1];
+  eq(nf.floor, false); eq(nf.line, '');
+});
+t('potsFor: target reached and no target lines', () => {
+  const done = A.potsFor({ travelBalanceMYR: 1500 }, { travel: 1000 })[0];
+  eq(done.line, 'Target reached'); eq(done.tone, 'ok'); eq(done.floor, false);
+  const near = A.potsFor({ travelBalanceMYR: 999.8 }, { travel: 1000 })[0];
+  eq(near.line, '99% of RM1,000 \u00B7 RM0.20 to go'); // never "100%" before it is reached
+  const none = A.potsFor({ travelBalanceMYR: 300 }, {})[0];
+  eq(none.line, ''); eq(none.pct, null);
+  eq(A.potsFor({}, { travel: 5000 })[0].line, ''); // unknown balance: just the sync note
 });
 t('potsFor: Emergency cushion override wins; no basis means no default', () => {
   const o = A.potsFor(potData, { ef: 10000 })[1];

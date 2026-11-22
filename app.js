@@ -191,10 +191,16 @@ function potsFor(d, targets) {
   const pot = (key, name, balance, target, extra) => {
     const known = num(balance);
     const hasT = num(target) && target > 0;
-    return Object.assign({ key, name, balance: known ? balance : null, target: hasT ? target : null,
+    const p = Object.assign({ key, name, balance: known ? balance : null, target: hasT ? target : null,
       pct: known && hasT ? Math.max(0, Math.min(100, balance / target * 100)) : null,
       toGo: known && hasT ? Math.max(0, Math.round((target - balance) * 100) / 100) : null,
-      reached: known && hasT && balance >= target, note: '' }, extra);
+      reached: known && hasT && balance >= target, note: '', floor: false, tone: 'ok', line: '' }, extra);
+    // The one line under the balance: "24% of RM5,000 · RM3,800.00 to go" (or "Target reached").
+    // A pot with no target (or an unknown balance) has none; the card says "No target set" itself.
+    if (p.target !== null && p.balance !== null && !p.floor) {
+      p.line = p.reached ? 'Target reached' : `${Math.min(99, Math.round(p.pct))}% of ${fmtWhole(p.target)} \u00B7 ${fmt(p.toGo)} to go`;
+    }
+    return p;
   };
   const out = [];
   out.push(pot('travel', 'Travel Fund', d.travelBalanceMYR, targets.travel, { editable: true,
@@ -203,18 +209,22 @@ function potsFor(d, targets) {
     const basis = d.efMonthlyBasisMYR > 0 ? d.efMonthlyBasisMYR : null;
     const custom = targets.ef > 0;
     const target = custom ? targets.ef : basis ? basis * 3 : null;
-    const tail = 'the envelope only — off-budget savings not counted';
+    const months = basis ? d.efBalanceMYR / basis : null;
     out.push(pot('ef', 'Emergency cushion', d.efBalanceMYR, target, { editable: true, custom,
-      defaultTarget: basis ? basis * 3 : null, months: basis ? d.efBalanceMYR / basis : null,
-      note: (target ? (custom ? `toward your ${fmt(target)} target` : `toward a 3-month cushion (${fmt(target)})`) + ' · ' : '') + tail }));
+      defaultTarget: basis ? basis * 3 : null, months,
+      note: (months !== null ? `About ${months.toFixed(1)} months of your usual spending \u00B7 ` : '') + 'this pot only; savings held elsewhere are not counted' }));
   }
   const b = d.buffer;
   if (b && num(b.balanceMYR)) {
     const floor = b.floorMYR > 0 ? b.floorMYR : null;
     const low = floor !== null && b.balanceMYR < floor;
-    out.push(pot('buffer', 'Buffer', b.balanceMYR, floor, { editable: false, low,
-      note: floor === null ? '' : low ? `${fmt(floor - b.balanceMYR)} below the floor — salary above plan refills it first`
-        : `${fmt(b.balanceMYR - floor)} above the floor · covers one-off shocks` }));
+    // The Buffer's "target" is a FLOOR (a minimum): no percent, no "to go". Below it is a warning.
+    const hasFloor = floor !== null;
+    out.push(pot('buffer', 'Buffer', b.balanceMYR, floor, { editable: false, low, floor: hasFloor,
+      tone: low ? 'warn' : 'ok',
+      line: !hasFloor ? '' : low ? `${fmt(floor - b.balanceMYR)} below its ${fmtWhole(floor)} floor`
+        : b.balanceMYR - floor < 0.005 ? `At its ${fmtWhole(floor)} floor` : `${fmt(b.balanceMYR - floor)} above its ${fmtWhole(floor)} floor`,
+      note: !hasFloor ? '' : low ? 'Salary above plan refills it first' : 'Covers one-off shocks' }));
   }
   return out;
 }
@@ -857,14 +867,11 @@ function jarSvg(id, pct, opts) {
     <defs><clipPath id="${esc(id)}"><rect x="12" y="26" width="80" height="88" rx="20"/></clipPath></defs>
     <rect class="jar-lid" x="32" y="6" width="40" height="14" rx="5"/>
     <rect class="jar-glass" x="12" y="26" width="80" height="88" rx="20"/>
-    <g clip-path="url(#${esc(id)})"><rect class="jar-water${opts.noTarget ? ' idle' : ''}${opts.tone === 'warn' ? ' warn' : ''}" x="12" y="26" width="80" height="88" data-y="${y}" style="transform:translateY(${start}px)"/></g>
+    <g clip-path="url(#${esc(id)})"><g class="jar-water${opts.noTarget ? ' idle' : ''}${opts.tone === 'warn' ? ' warn' : ''}" data-y="${y}" style="transform:translateY(${start}px)"><rect x="12" y="26" width="80" height="88"/><rect class="jar-surface" x="12" y="26" width="80" height="4"/></g></g>
     <rect class="jar-line" x="12" y="26" width="80" height="88" rx="20"/>
     ${mark}
     ${opts.text ? `<text class="jar-pct" x="52" y="60">${p}%</text><text class="jar-sub" x="52" y="75">left</text>` : ''}</svg>`;
 }
-// Every pot bar is gold: gold = money, and a pot's jar and its bar then match.
-const POT_BAR = 'var(--gold)';
-const barWidth = (pct) => Math.max(2, Math.min(100, Math.round(pct)));
 
 // A Budgets bar DRAINS: the fill is the share of the envelope still LEFT, so full = untouched
 // and empty = nothing left (the same meaning as the jar). `projected` is where the month is
@@ -1290,11 +1297,17 @@ function txnRow(t, attr, longDate) {
 // Every bottom sheet is a modal dialog: labelled by its #sheetTitle, focus moves
 // into it (and back to what opened it on close), Tab stays inside, Escape closes.
 let sheetReturnFocus = null;
+// A sheet's top is a grab handle (tap or drag down = close); its Close button is pinned in a
+// footer so it is reachable however tall the content. closeLabel === null = the caller supplies
+// its own Close (the Add sheet's footer). The entrance animation runs only when the sheet goes
+// from hidden to shown: a re-render or one sheet replacing another does not replay it.
 function mountSheet(inner, closeLabel) {
   const sheet = $('sheet');
-  if (sheet.classList.contains('hidden')) sheetReturnFocus = document.activeElement;
-  sheet.innerHTML = `<div class="inner scroll" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">${inner}
-    <button class="btn secondary" id="sheetCancel">${closeLabel || 'Close'}</button></div>`;
+  const wasHidden = sheet.classList.contains('hidden');
+  if (wasHidden) sheetReturnFocus = document.activeElement;
+  sheet.classList.toggle('enter', wasHidden);
+  sheet.innerHTML = `<div class="inner scroll${wasHidden ? ' enter' : ''}" role="dialog" aria-modal="true" aria-labelledby="sheetTitle"><button type="button" class="sheet-grab" aria-label="Close"><span></span></button>${inner}${closeLabel === null ? '' : `
+    <div class="sheetfoot"><button class="btn secondary" id="sheetCancel">${closeLabel || 'Close'}</button></div>`}</div>`;
   sheet.classList.remove('hidden');
   placeToast();
   // Everything behind the sheet leaves the accessibility tree and tab order.
@@ -1303,11 +1316,42 @@ function mountSheet(inner, closeLabel) {
   // Property, not addEventListener: a {once} listener was consumed by any tap
   // INSIDE the sheet (clicks bubble), leaving the backdrop dead afterwards.
   sheet.onclick = (e) => { if (e.target === sheet) closeSheet(); };
-  $('sheetCancel').addEventListener('click', closeSheet);
+  const cancel = $('sheetCancel');
+  if (cancel) cancel.addEventListener('click', closeSheet);
+  wireGrab(sheet.querySelector('.sheet-grab'), sheet.querySelector('.inner'));
   const title = $('sheetTitle');
   if (title) { title.tabIndex = -1; title.focus({ preventScroll: true }); }
   syncSheetKeyboard();
   return sheet;
+}
+// Grab handle: a tap closes (same path as Close); dragging it down more than 70px closes, a
+// shorter drag springs back. Pointer events on the handle only (touch-action: none in CSS).
+function wireGrab(grab, inner) {
+  if (!grab || !inner) return;
+  let y0 = null, dy = 0, moved = false;
+  grab.addEventListener('pointerdown', (e) => {
+    y0 = e.clientY; dy = 0; moved = false;
+    try { grab.setPointerCapture(e.pointerId); } catch (err) { /* synthetic pointers */ }
+    inner.style.transition = 'none';
+  });
+  grab.addEventListener('pointermove', (e) => {
+    if (y0 === null) return;
+    dy = Math.max(0, e.clientY - y0);
+    if (dy > 4) moved = true;
+    inner.style.transform = 'translateY(' + dy + 'px)';
+  });
+  const end = (cancelled) => {
+    if (y0 === null) return;
+    const d = dy;
+    y0 = null;
+    if (!cancelled && d > 70) { closeSheet(); return; }
+    inner.style.transition = reduceMotion() ? 'none' : 'transform .18s cubic-bezier(.22,.9,.34,1)';
+    inner.style.transform = 'translateY(0px)';
+  };
+  grab.addEventListener('pointerup', () => end(false));
+  grab.addEventListener('pointercancel', () => end(true));
+  // A tap or key press (click) closes; the click that ends a real drag does not.
+  grab.addEventListener('click', (e) => { if (moved) { moved = false; e.preventDefault(); return; } closeSheet(); });
 }
 const showSheet = (inner) => mountSheet(inner);
 
@@ -1328,7 +1372,7 @@ function sheetKeys(e) {
 function confirmSheet(title, body, confirmLabel, alt, plain) {
   return new Promise((resolve) => {
     let answered = false;
-    const sheet = mountSheet(`<h2 id="sheetTitle" style="margin:0;font-size:17px;font-weight:700">${title}</h2>
+    const sheet = mountSheet(`<h2 id="sheetTitle" style="margin:0;font-size:17px;font-weight:800">${title}</h2>
       <div class="muted" style="font-size:14px;margin-top:6px;line-height:1.45">${body}</div>
       <button class="btn${plain ? '' : ' danger'}" id="confirmYes">${confirmLabel}</button>
       ${alt ? `<button class="btn quiet" id="confirmAlt">${alt.label}</button>` : ''}`, 'Cancel');
@@ -1435,7 +1479,7 @@ function openRecapSheet() {
     <div class="sub">${fmt(p.start)} &rarr; ${fmt(p.end)}</div></div>
     <div class="val${p.delta > 0 ? ' in' : ''}"${p.delta < 0 ? ' style="color:var(--amber)"' : ''}>${p.delta > 0 ? '+' : ''}${fmt(p.delta)}</div></div>` : '';
   const pots = s ? pot('Buffer', s.buffer) + pot('Emergency cushion', s.ef) : '';
-  showSheet(`<h2 id="sheetTitle" style="margin:0;font-size:17px;font-weight:700">${esc(r.label)} recap</h2>
+  showSheet(`<h2 id="sheetTitle" style="margin:0;font-size:17px;font-weight:800">${esc(r.label)} recap</h2>
     <div style="display:flex;align-items:baseline;gap:8px;margin-top:6px"><div class="num" style="font-size:30px;font-weight:800;letter-spacing:-.6px">${fmt(r.total)}</div>
       <div class="muted" style="font-size:13px">${plural(r.count, 'transaction')}</div></div>${vsLine}
     ${cats ? head('By category') + `<div>${cats}</div>` : ''}
@@ -1579,7 +1623,7 @@ async function notReal(t, after) {
 // the original in a repair trail and the next sync corrects Actual too.
 function fixAmountSheet(t, after) {
   const flag = amountFlag(t);
-  const sheet = mountSheet(`<h2 id="sheetTitle" style="margin:0;font-size:17px;font-weight:700">Fix amount</h2>
+  const sheet = mountSheet(`<h2 id="sheetTitle" style="margin:0;font-size:17px;font-weight:800">Fix amount</h2>
     <div class="muted" style="font-size:13px;margin-top:2px">${esc(t.merchant)} &middot; ${esc(fmtDay(t.date))} &middot; read as ${fmtSigned(t.amountMYR)}</div>
     ${flag ? `<div class="flag">${flag}</div>` : ''}
     <div class="fieldlabel" id="fixLabel">Correct amount (RM)</div>
@@ -1905,7 +1949,7 @@ function renderMore() {
     <li><b style="color:var(--text)">The jar</b> &mdash; filled to the share of this month&rsquo;s budget that is still left, and labelled &ldquo;this month&rdquo;. It empties as you spend.</li>
     <li><b style="color:var(--text)">Budget jars</b> &mdash; each budget is a jar showing what&rsquo;s left of it: full means untouched, empty means nothing left. Orange water means this month is heading over. An empty red jar marked &ldquo;over&rdquo; means it already is, with a red bar under it that is longer the further over (measured against the budget&rsquo;s size). A grey jar with a tick is a bill that&rsquo;s already paid, at the bottom. The thin bars under Other spending are only relative to the largest.</li>
     <li><b style="color:var(--text)">Payday</b> &mdash; the line at the bottom of the top card counts down to the day of the month set above, from the date of the latest numbers.</li>
-    <li><b style="color:var(--text)">Tabung</b> &mdash; your savings pots, with the total on Home. Each jar and bar fills toward the pot&rsquo;s target, in gold because it&rsquo;s money; a pot with no target shows a full jar in resting gold. Travel Fund and the Emergency cushion take a target you set on this phone; the Buffer&rsquo;s target is its floor.</li>
+    <li><b style="color:var(--text)">Tabung</b> &mdash; your savings pots, with the total on Home. Each pot is one jar, filled toward its target in gold because it&rsquo;s money, with the percent and what&rsquo;s left in one line under the balance; a pot with no target shows a full jar in resting gold. Travel Fund and the Emergency cushion take a target you set on this phone. The Buffer is measured against its floor, a minimum rather than a goal: its jar turns orange and the line turns orange when it dips below.</li>
     <li><b style="color:var(--text)">The rules</b> &mdash; keyword rules in the sheet&rsquo;s Rules tab pick a category from the merchant name; anything they miss waits in Review.</li>
     <li><b style="color:var(--text)">Buffer floor</b> &mdash; the cushion for one-off shocks (the worst single month seen); salary above plan refills it before anything else.</li></ul></details>`;
   html += `<div class="muted" style="text-align:center;margin-top:20px;font-size:12px">Updated ${esc(fmtUpdated(data.generatedAt))}</div>`;
@@ -2010,20 +2054,23 @@ function renderMore() {
 // with null says "Balance arrives after the next sync" and draws no bar.
 function potCardHtml(p) {
   const known = p.balance !== null;
+  const noTarget = known && p.pct === null; // holds money, nothing to measure it against
+  // One line under the balance. A pot with a target: percent, target, what is left. The Buffer's
+  // target is a floor: how far below or above it (orange when below). No target: as before.
+  const lineTxt = p.line ? esc(p.line) : 'No target set';
   const heading = known
     ? `<div class="bal"${p.balance < 0 ? ' style="color:var(--red)"' : ''}>${fmt(p.balance)}</div>
-       <div class="sub">${p.target ? `of ${fmt(p.target)}` : 'No target set'}${p.months !== undefined && p.months !== null ? ` &middot; &asymp; ${p.months.toFixed(1)} mo of core outflow` : ''}${p.balance < 0 ? ' &middot; below zero' : ''}</div>`
+       <div class="sub"${p.low ? ' style="color:var(--amber)"' : ''}>${lineTxt}${p.balance < 0 && !p.floor ? ' &middot; below zero' : ''}</div>`
     : `<div class="sub" style="margin-top:4px">${esc(p.note)}</div>`;
   const pctNow = p.pct === null ? 0 : Math.round(p.pct);
-  const noTarget = known && p.pct === null; // holds money, nothing to measure it against
-  const bar = known && p.target
-    ? `<div class="track lg" style="margin-top:14px" role="progressbar" aria-label="${esc(p.name)} toward its target" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pctNow}"><div class="fill" style="width:${barWidth(p.pct)}%;background:${POT_BAR}" data-w="1"></div></div>
-       <div class="foot"><span${p.low ? ' style="color:var(--amber)"' : ''}>${p.reached ? 'Target reached' : `${fmt(p.toGo)} to go`}</span><span class="of">${pctNow}%</span></div>` : '';
-  const note = known && p.note ? `<div class="note"${p.low ? ' style="color:var(--amber)"' : ''}>${esc(p.note)}</div>` : '';
+  const note = known && p.note ? `<div class="note">${esc(p.note)}</div>` : '';
   const hasTarget = p.target !== null && (p.key === 'travel' || p.custom);
-  const btn = p.editable ? `<button type="button" class="btn secondary" data-target="${p.key}">${hasTarget || (p.key === 'ef' && p.target) ? 'Change target' : 'Set a target'}</button>` : '';
-  return `<div class="card pot" data-pot="${p.key}"><div class="head">${jarSvg('jarPot-' + p.key, p.pct, { w: 56, noTarget, label: known && p.pct !== null ? `${p.name} jar, ${pctNow} percent of target` : noTarget ? `${p.name} jar, no target set` : `${p.name} jar` })}
-    <div style="min-width:0"><div class="nm">${esc(p.name)}</div>${heading}</div></div>${bar}${note}${btn}</div>`;
+  const btn = p.editable ? `<button type="button" class="potbtn" data-target="${p.key}">${hasTarget || (p.key === 'ef' && p.target) ? 'Change target' : 'Set a target'}</button>` : '';
+  const label = !known ? `${p.name} jar`
+    : p.floor ? (p.low ? `${p.name} jar, ${pctNow} percent of its floor, below the floor` : `${p.name} jar, at or above its floor`)
+    : p.pct !== null ? `${p.name} jar, ${pctNow} percent of target` : `${p.name} jar, no target set`;
+  return `<div class="card pot" data-pot="${p.key}"><div class="head">${jarSvg('jarPot-' + p.key, p.pct, { w: 56, noTarget, tone: p.tone === 'warn' ? 'warn' : undefined, label })}
+    <div style="min-width:0"><div class="nm">${esc(p.name)}</div>${heading}</div></div>${note}${btn}</div>`;
 }
 
 function renderPots() {
@@ -2048,7 +2095,7 @@ function openTargetSheet(key) {
   if (!p || !p.editable) return;
   const custom = potTargets[key] > 0;
   const blurb = key === 'ef'
-    ? `The default is 3 months of core outflow${p.defaultTarget ? ' (' + fmt(p.defaultTarget) + ')' : ''}. A target you set here replaces it.`
+    ? `The default is 3 months of your usual spending${p.defaultTarget ? ' (' + fmt(p.defaultTarget) + ')' : ''}. A target you set here replaces it.`
     : 'Your target stays on this phone.';
   const sheet = mountSheet(`<h2 id="sheetTitle" style="margin:0;font-size:17px;font-weight:800">${esc(p.name)} target</h2>
     <div class="muted" style="font-size:13px;margin-top:2px">${blurb}</div>
@@ -2425,11 +2472,12 @@ function showAddExtra(open) {
 // listeners travel with them) and move back when it closes.
 function openAddSheet() {
   if (!$('sheet').classList.contains('hidden')) return;
-  mountSheet('<div id="addHost"></div>', 'Close');
+  mountSheet('<div id="addHost"></div>', null); // Close lives in the Add footer, beside Log spend
   const host = $('addHost');
   host.appendChild($('addForm'));
   host.appendChild($('addFoot')); // the pinned Log button (submits addForm via its form attribute)
   host.appendChild($('addHelp'));
+  $('addClose').onclick = closeSheet;
   $('sheet').querySelector('.inner').setAttribute('aria-labelledby', 'addTitle');
   sheetOnClose = () => {
     $('view-add').appendChild($('addForm'));

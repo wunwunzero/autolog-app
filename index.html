@@ -46,7 +46,7 @@
     --bar: #6F9084; --amber-bar: #E8893F; --red-bar: #E5564A; --over-track: #3B2220; --seg-thumb: #3A4D45;
     --mint: #163A30; --mint-line: #245244; --mint-in: #1E4539; --mint-ink: #BDEBD5; --mint-text: #B9D3C7; --mint-body: #D6E8DF;
     --hero-ink: #fff; --icon: #8FD9B8; --navon: #1E4539; --mintbtn: #1B2B25; --mintbtn-line: #2E4A3F; --rbtn-line: #26352F;
-    --jar-glass: #1E4539; --jar-text: #E9F2ED; --jar-idle: #BE9226;
+    --jar-glass: #1E4539; --jar-text: #E9F2ED; --jar-idle: #BE9226; --jar-surface: #F6CE6B;
     --c-gold: #ffd60a;
     --c-orange: #ff9f0a; --c-green: #30d158; --c-blue: #0a84ff; --c-cyan: #64d2ff; --c-pink: #ff375f; --c-purple: #bf5af2;
     --c-indigo: #5e5ce6; --c-gray: #98989d; --c-brown: #ac8e68; --c-mint: #63e6e2; --c-teal: #40c8e0; }
@@ -59,7 +59,7 @@
       --bar: #6A897C; --amber-bar: #D9792B; --red-bar: #C4382C; --over-track: #F6DEDA; --seg-thumb: #FFFFFF;
       --mint: #DCEFE5; --mint-line: #BFDFCF; --mint-in: #F6FBF8; --mint-ink: #0F4A3D; --mint-text: #35584C; --mint-body: #2B4239;
       --hero-ink: #0F4A3D; --icon: #14594A; --navon: #DCEFE5; --mintbtn: #E8F4EE; --mintbtn-line: #BFDFCF; --rbtn-line: #D5E2DB;
-      --jar-glass: #FFFFFF; --jar-text: #14594A; --jar-idle: #A9822A;
+      --jar-glass: #FFFFFF; --jar-text: #14594A; --jar-idle: #A9822A; --jar-surface: #9A7412;
       --c-gold: #d4a000;
       --c-orange: #ff9500; --c-green: #34c759; --c-blue: #007aff; --c-cyan: #32ade6; --c-pink: #ff2d55; --c-purple: #af52de;
       --c-indigo: #5856d6; --c-gray: #8e8e93; --c-brown: #a2845e; --c-mint: #00c7be; --c-teal: #30b0c7; }
@@ -107,10 +107,10 @@
      and never grows taller than what is visible. Without visualViewport none of this applies. */
   #sheet { padding-bottom: var(--kb, 0px); }
   #sheet.kb .inner.scroll { max-height: min(82vh, calc(var(--vvh, 100vh) - 12px)); }
-  #sheet.kb .inner { padding-bottom: 14px; }
+  #sheet.kb .sheetfoot { padding-bottom: 12px; }
   #sheet h2 { margin: 0; }
   /* One sheet header: title, then the amount large, then one small facts line. */
-  .sheet-title { margin: 0; font-size: 17px; font-weight: 700; }
+  .sheet-title { margin: 0; font-size: 17px; font-weight: 800; }
   .sheet-amt { font-size: 30px; font-weight: 800; letter-spacing: -.6px; line-height: 1.15; margin-top: 4px; }
   .sheet-amt .of { font-size: 15px; font-weight: 600; letter-spacing: 0; color: var(--muted); }
   .sheet-facts { font-size: 13px; color: var(--muted); margin-top: 4px; }
@@ -166,8 +166,25 @@
   .chips .more { background: none; border-style: dashed; border-color: var(--fill2); color: var(--blue); }
   .chips-more { display: contents; }
   #sheet { position: fixed; inset: 0; background: var(--scrim); display: flex; align-items: flex-end; z-index: 30; }
+  /* No bottom padding on the sheet itself: every sheet ends in a pinned footer (.sheetfoot, or the
+     Add form's .addfoot) that carries the bottom gap + home-indicator inset, so content scrolls
+     UNDER it and nothing shows through below it. */
   #sheet .inner { background: var(--sheet); border-radius: 28px 28px 0 0; width: 100%;
-    padding: 20px 18px calc(24px + env(safe-area-inset-bottom)); }
+    padding: 6px 18px 0; }
+  /* Grab handle: a 44px-tall hit area across the top, a 36x5 pill in it. Dragging it down closes. */
+  .sheet-grab { width: calc(100% + 36px); margin: 0 -18px; height: 44px; padding: 0; background: none; border: 0;
+    touch-action: none; cursor: grab; display: flex; align-items: center; justify-content: center; }
+  .sheet-grab span { display: block; width: 36px; height: 5px; border-radius: 3px; background: var(--bar); }
+  .sheet-grab:focus-visible { outline-offset: -4px; border-radius: 22px; }
+  #sheet .inner > .sheet-grab + h2 { margin-top: 0; }
+  .sheetfoot { position: sticky; bottom: 0; z-index: 2; background: var(--sheet); border-top: 1px solid var(--hair);
+    margin: 14px -18px 0; padding: 0 18px calc(12px + env(safe-area-inset-bottom)); }
+  .sheetfoot .btn { margin-top: 12px; }
+  /* Entrance only (closing stays instant): the sheet rises 28px, the scrim fades in. */
+  #sheet.enter { animation: scrimIn .18s ease-out; }
+  #sheet .inner.enter { animation: sheetIn .22s cubic-bezier(.22,.9,.34,1); }
+  @keyframes scrimIn { from { background-color: transparent; } }
+  @keyframes sheetIn { from { transform: translateY(28px); } } /* transform only: a sheet is never see-through, even if a frame is late */
   #toast { position: fixed; left: 50%; transform: translateX(-50%) translateY(8px); bottom: calc(100px + env(safe-area-inset-bottom));
     background: var(--toast); border: 1px solid var(--card-line); box-shadow: 0 6px 20px rgba(0,0,0,.3); color: var(--toast-ink); border-radius: 100px; padding: 10px 18px;
     font-size: 13px; font-weight: 600; z-index: 40; transition: opacity .3s, transform .3s; opacity: 0;
@@ -327,9 +344,12 @@
   .jar-lid { fill: var(--icon); }
   .jar-glass { fill: var(--jar-glass); }
   .jar-water { fill: var(--gold); transition: transform .8s cubic-bezier(.22,.9,.34,1); }
+  .jar-surface { fill: var(--jar-surface); } /* darker line on top of the water: the LEVEL, legible on white glass */
   .jar-water.idle { fill: var(--jar-idle); } /* a pot with no target: full, gold at rest, never "empty" */
   .jar-line { fill: none; stroke: var(--icon); stroke-width: 4; }
   .jar-water.warn { fill: var(--amber-bar); }
+  .jar-water.warn .jar-surface { fill: var(--amber); }
+  .jar-water.idle .jar-surface { fill: var(--jar-idle); } /* invisible on purpose: the resting jar has no level */
   .jar.over .jar-lid { fill: var(--red-bar); }  .jar.over .jar-line { stroke: var(--red-bar); }  .jar.over .jar-glass { fill: var(--over-track); }
   .jar.paid .jar-lid { fill: var(--bar); }  .jar.paid .jar-line { stroke: var(--bar); }  .jar.paid .jar-glass { fill: var(--fill); }
   .jar-mark { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-width: 7; }
@@ -352,6 +372,13 @@
     margin: 10px -18px 0; padding: 0 18px calc(12px + env(safe-area-inset-bottom)); }
   #addHost .addfoot .btn { margin-top: 12px; }
   #sheet.kb #addHost .addfoot { padding-bottom: 12px; }
+  /* Add footer: Close (secondary, natural width) beside Log spend (gold, the rest). Close only
+     exists in the sheet; as the Add tab the footer is just the Log button. */
+  .addfoot .addclose { display: none; }
+  #addHost .addfoot { display: flex; gap: 10px; }
+  #addHost .addfoot .addclose { display: block; flex: 0 0 auto; width: auto; min-width: 88px; padding-inline: 18px; }
+  #addHost .addfoot #addSave { flex: 1 1 auto; width: auto; }
+  #addHost details.help { margin-bottom: calc(18px + env(safe-area-inset-bottom)); }
   .abtn.mintb { background: var(--mintbtn); border: 1.5px solid var(--mintbtn-line); color: var(--mint-ink); }
   .abtn:active { transform: scale(.98); }
   /* Tabung: one tappable row on Home, pot cards on the Tabung tab. */
@@ -364,10 +391,10 @@
   .pot .nm { font-size: 17px; font-weight: 800; }
   .pot .bal { font-size: 26px; font-weight: 800; letter-spacing: -.5px; line-height: 1.15; overflow-wrap: anywhere; }
   .pot .sub { font-size: 13px; font-weight: 600; color: var(--muted); margin-top: 2px; }
-  .pot .foot { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; font-weight: 700; margin-top: 8px; }
   .pot .note { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.45; }
-  .pot .btn { margin-top: 12px; }
-  .pot .btn.secondary { min-height: 48px; padding: 12px; font-size: 15px; }
+  /* "Change target" / "Set a target": a quiet text button (link colour), 44px tall. */
+  .potbtn { display: block; background: none; border: 0; color: var(--blue); font: inherit; font-size: 14px; font-weight: 700;
+    text-align: left; min-height: 44px; min-width: 44px; padding: 12px 2px; margin: 4px 0 -8px; }
   /* Loading skeleton: shimmering placeholders while the backend builds the snapshot. */
   .skel { background: linear-gradient(90deg, var(--skel-a) 25%, var(--skel-b) 50%, var(--skel-a) 75%);
     background-size: 200% 100%; animation: shimmer 1.3s linear infinite; border-radius: 10px; }
@@ -377,6 +404,7 @@
   @media (prefers-reduced-motion: reduce) {
     .skel, #tab-refresh.busy .ico svg { animation: none; }
     .fill, .jar-water, .colchart .col .bar { transition: none; }
+    #sheet.enter, #sheet .inner.enter { animation: none; }
   }
   /* Repeat chips: one quiet horizontal row, visually distinct from category chips. */
   #recentChips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-left: -18px; margin-right: -18px; padding: 0 18px; }
@@ -467,7 +495,7 @@
           <input type="text" id="addNote" aria-label="Note" placeholder="Note (optional)" style="flex:1.3" autocomplete="off"></div>
       </div>
       </form>
-      <div class="addfoot" id="addFoot"><button class="btn" id="addSave" type="submit" form="addForm">Log spend</button></div>
+      <div class="addfoot" id="addFoot"><button class="btn secondary addclose" id="addClose" type="button">Close</button><button class="btn" id="addSave" type="submit" form="addForm">Log spend</button></div>
       <details class="help" id="addHelp"><summary>How logging works</summary><ul>
         <li>Same pipeline as Apple Pay taps &mdash; dedup, alerts and budgets included.</li>
         <li>No category? The rules decide, or it lands in Review.</li>
