@@ -16,7 +16,7 @@
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
-const APP_VERSION = 38; // keep in step with index.html's app.js?v=
+const APP_VERSION = 39; // keep in step with index.html's app.js?v=
 // The backend address is fixed and not secret (auth lives in the key), so connecting
 // only truly requires the key itself.
 const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
@@ -402,7 +402,7 @@ function addErrors(f) {
   // message names what that mode shows. WHO paid back stays optional: money back
   // with no person attached (selling something, a cash refund) is a real entry.
   if (!String(f.merchant || '').trim()) errs.push({ id: 'addMerchant', msg: f.paid ? 'Say what it was for, e.g. Ali dinner' : 'Add a merchant, e.g. Starbucks' });
-  if (f.paid && !f.cat) errs.push({ id: 'addChips', msg: 'Pick the envelope you paid it from' });
+  if (f.paid && !f.cat) errs.push({ id: 'addChips', msg: 'Pick the category it came from' });
   return errs;
 }
 // One sheet header: title, the amount large, one small facts line. `title` and `facts` are
@@ -425,6 +425,15 @@ function dismissActionToast() {
   if (!t.querySelector('.toast-act')) return;
   clearTimeout(t._h);
   hideToast();
+}
+// With a sheet open, the bottom is the sheet's buttons: the toast sits up top. Also called when a
+// sheet opens or closes, so a toast raised just before a sheet opens (or still showing when it
+// closes) is never left over the wrong place.
+function placeToast() {
+  const t = $('toast');
+  const sheetOpen = !$('sheet').classList.contains('hidden');
+  t.style.bottom = sheetOpen ? 'auto' : '';
+  t.style.top = sheetOpen ? 'calc(14px + env(safe-area-inset-top))' : '';
 }
 function toast(msg, action, action2) {
   const t = $('toast');
@@ -450,10 +459,7 @@ function toast(msg, action, action2) {
   // Reaching Undo by VoiceOver/keyboard stops the clock; leaving restarts it.
   t.onfocusin = () => clearTimeout(t._h);
   t.onfocusout = () => { clearTimeout(t._h); t._h = setTimeout(hide, 4000); };
-  // With a sheet open, the bottom is the sheet's buttons: show the toast up top.
-  const sheetOpen = !$('sheet').classList.contains('hidden');
-  t.style.bottom = sheetOpen ? 'auto' : '';
-  t.style.top = sheetOpen ? 'calc(14px + env(safe-area-inset-top))' : '';
+  placeToast();
   t.style.opacity = 1;
   t.style.transform = 'translateX(-50%)'; // rises from its resting +8px offset
   clearTimeout(t._h);
@@ -708,9 +714,16 @@ function barRow(name, right, pct, color, opts) {
     ${opts.paceText ? `<div class="pacetext" style="color:${opts.paceColor || 'var(--muted)'}">${opts.paceText}</div>` : ''}</div>${opts.cat ? '<span class="chev" aria-hidden="true">&rsaquo;</span>' : ''}</div>`;
 }
 
+// Bars sweep in from empty only the first time a root is painted with any; a later re-render
+// (refresh, tab switch) puts them straight at their final size, no transition, no flash at zero.
+const fillsSwept = {};
 function animateFills(rootId) {
+  const fills = document.querySelectorAll('#' + rootId + ' .fill[data-w]');
+  const later = !!fillsSwept[rootId];
+  if (fills.length) fillsSwept[rootId] = true;
+  if (later) fills.forEach((f) => { f.style.transition = 'none'; f.style.transform = 'scaleX(1)'; });
   requestAnimationFrame(() => requestAnimationFrame(() => {
-    document.querySelectorAll('#' + rootId + ' .fill[data-w]').forEach((f) => { f.style.transform = 'scaleX(1)'; });
+    if (!later) fills.forEach((f) => { f.style.transform = 'scaleX(1)'; });
     document.querySelectorAll('#' + rootId + ' .jar-water[data-y]').forEach((w) => { w.style.transform = 'translateY(' + w.dataset.y + 'px)'; });
   }));
 }
@@ -753,14 +766,21 @@ function isoDayNum(iso) {
   return m ? Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) / 86400e3 : NaN;
 }
 // TnG and HSBC are the channels whose lag makes the budget figures optimistic.
-// Returns the line's text, or null when both are fresh / unknown.
+// Sources more than 7 days behind the snapshot's today, oldest first. Pure.
+// -> [{ key, label, gap (days), date (the coverage ISO date) }]
+function staleSources(today, coverage) {
+  if (!today || !coverage) return [];
+  return [['tng', 'TnG'], ['hsbc', 'HSBC']]
+    .map(([key, label]) => ({ key, label, gap: isoDayNum(today) - isoDayNum(coverage[key]), date: coverage[key] }))
+    .filter((x) => x.gap > 7)
+    .sort((a, b) => b.gap - a.gap);
+}
+// The strip's old one-line text, or null when both are fresh / unknown.
 function staleCaptureText() {
-  const today = snapToday();
-  if (!today || !data.coverage) return null;
-  const stale = [['tng', 'TnG'], ['hsbc', 'HSBC']]
-    .map(([k, label]) => ({ label, gap: isoDayNum(today) - isoDayNum(data.coverage[k]) }))
-    .filter((x) => x.gap > 7);
-  if (!stale.length) return null;
+  if (!data) return null;
+  const list = staleSources(snapToday(), data.coverage);
+  if (!list.length) return null;
+  const stale = ['tng', 'hsbc'].map((k) => list.find((x) => x.key === k)).filter(Boolean); // fixed channel order
   const tail = ' — the real figure may be lower';
   if (stale.length === 1) return `${stale[0].label} last synced ${stale[0].gap} days ago${tail}`;
   return `${stale.map((x) => x.label).join(' and ')} last synced ${Math.max(...stale.map((x) => x.gap))}+ days ago${tail}`;
@@ -925,14 +945,11 @@ function renderOverview() {
   const opening = tdy ? Math.max(0, rawLeft + tdy.budgeted) / daysLeft : 0;
   const bare = (v) => (tm ? W(v) : fmt(v));
   const money = (v) => (tm ? W(v) + ' of work' : fmt(v));
-  let tl1 = '', tl2 = '', tlWarn = false;
+  // Today's figure leads the hero when it exists; tlr is null in every other case.
+  let tlr = null, tl2 = '';
   if (tdy && bCats.length && left > 0.005) {
-    const tlr = todayLeft(opening, tdy.budgeted);
-    if (tlr.over > 0.005) {
-      tl1 = `${money(tlr.over)} over today's ${bare(opening)}`;
-      tlWarn = true;
-    } else {
-      tl1 = `${money(tlr.left)} left for today`;
+    tlr = todayLeft(opening, tdy.budgeted);
+    if (!(tlr.over > 0.005)) {
       const outside = Math.round((tdy.spent - tdy.budgeted) * 100) / 100;
       if (!tdy.any) tl2 = 'Nothing logged today yet';
       else if (tdy.budgeted > 0.005) tl2 = `${money(tdy.budgeted)} spent of today's ${bare(opening)}` + (outside > 0.005 ? ` · ${money(outside)} outside the budgets` : '');
@@ -940,18 +957,21 @@ function renderOverview() {
       else tl2 = 'Nothing spent today yet';
     }
   }
-  const todayLine = tl1 ? `<div class="tdy"><div class="tl${tlWarn ? ' warn' : ''}">${esc(tl1)}</div>${tl2 ? `<div class="ts">${esc(tl2)}</div>` : ''}</div>` : '';
   // No budgets in the sheet: just a plain line about today's spend.
   const plainToday = tdy ? (!tdy.any ? 'Nothing logged today yet' : tm ? `Today ${W(tdy.spent)} of work` : `Today ${fmt(tdy.spent)} spent`) : '';
-  const stale = staleCaptureText();
-  const staleLine = stale ? `<div class="flag" id="staleFlag" role="button" tabindex="0" style="display:flex;align-items:center;min-height:44px;margin-top:12px" aria-label="${esc(stale + '. Open More to import')}">${esc(stale)} &rsaquo;</div>` : '';
+  // Sources that lag make every figure here optimistic: the verdict says so, the strip is the way out.
+  const staleList = staleSources(snapToday(), data.coverage);
+  const staleNames = staleList.map((x) => x.label).join(' and ');
+  const staleTwo = staleList.length > 1;
+  const staleSay = staleList.length
+    ? `${staleNames} ${staleTwo ? 'haven&rsquo;t' : 'hasn&rsquo;t'} synced for ${staleList[0].gap}${staleTwo ? '+' : ''} days, so the real figure may be lower.` : '';
+  const staleLine = staleList.length ? `<div class="flag" id="staleFlag" role="button" tabindex="0" style="display:flex;align-items:center;min-height:44px;margin-top:12px" aria-label="Import ${esc(staleNames)} screenshots">Import ${esc(staleNames)} screenshots &rsaquo;</div>` : '';
 
-  // Next payday, counted from the snapshot's own today.
+  // Next payday, counted from the snapshot's own today: one muted line at the foot of the hero.
   const pd = snapToday() ? nextPayday(snapToday(), payday) : null;
   const pdWord = pd ? (pd.days === 0 ? 'today' : pd.days === 1 ? 'tomorrow' : `in ${pd.days} days`) : '';
-  const paydayRow = pd ? `<div class="inrow"><div class="tile">${ICON_CAL}</div>
-    <div class="grow"><div class="small">Next payday</div><div class="big">${pdWord}</div></div>
-    <div class="right"><div class="d">${esc(pd.label)}</div><div class="small">${esc(pd.weekday)}</div></div></div>` : '';
+  const pdText = pd ? `Payday ${pdWord} · ${pd.weekday.slice(0, 3)} ${pd.label}` : '';
+  const paydayRow = pd ? `<div class="payline">${ICON_CAL}<span>${esc(pdText)}</span></div>` : '';
 
   let hero;
   if (bCats.length) {
@@ -966,26 +986,52 @@ function renderOverview() {
     const forDays = `for the ${plural(daysLeft, 'day')} left this month`;
     const keep = `Keep to about ${dayAmt} ${dayUnit} ${forDays}.`; // the spoken (aria) form
     const dayHtml = `<div class="day">${dayAmt} <span>${dayUnit}</span></div>`;
+    // The month, as the one paragraph under today's lead (when today's figure leads).
+    const monthBold = `<b style="font-weight:800;color:var(--text)">${heroAmt}</b>`;
+    const monthTail = tm ? ` of your work left this month &middot; ${plural(daysLeft, 'day')} left`
+      : ` left this month of ${fmtWhole(totalBudget)} &middot; ${plural(daysLeft, 'day')} left`;
+    const monthHtml = monthBold + monthTail;
+    const monthSay = heroAmt + monthTail;
+    const lead = !!tlr;
     let st;
     if (left <= 0.005) {
       const used = overTotal > 0.005
-        ? `Envelopes are ${fmt(overTotal)} over in total &mdash; the sitting covers it from Buffer.` : 'Nothing is left to spend across the budgeted envelopes.';
+        ? `Your budgets are ${fmt(overTotal)} over in total. Cover it at the next sitting.` : 'Nothing is left to spend across your budgets.';
       st = { cls: 'red', icon: ICON_STOP, h: 'This month&rsquo;s budget is used up', day: '', p: used, say: used };
     } else if (overTotal > 0.005) {
-      const lower = `Already ${fmt(overTotal)} lower for overspent envelopes.`;
-      st = { cls: 'amber', icon: ICON_WARN, h: 'Some envelopes are over', day: dayHtml, p: `${forDays}. ${lower}`, say: `${lower} ${keep}` };
-    } else st = { cls: 'ok', icon: ICON_OK, h: 'You&rsquo;re on track', day: dayHtml, p: `${forDays}.`, say: keep };
-    const heroLabel = plainText(`Still free to spend ${heroAmt}, ${heroSub}. ${pd ? 'Next payday ' + pdWord + ', ' + pd.label + '. ' : ''}${st.h}. ${st.say} ${[tl1, tl2].filter(Boolean).join('. ')}`);
+      const lower = `Already ${fmt(overTotal)} lower for overspent budgets.`;
+      st = { cls: 'amber', icon: ICON_WARN, h: 'Some budgets are over', day: dayHtml, p: lead ? `${monthHtml}. ${lower}` : `${forDays}. ${lower}`,
+        say: lead ? `${monthSay}. ${lower}` : `${lower} ${keep}` };
+    } else {
+      st = { cls: 'ok', icon: ICON_OK, h: 'You&rsquo;re on track', day: dayHtml, p: lead ? monthHtml : `${forDays}.`, say: lead ? monthSay : keep };
+      if (staleList.length) { // a verdict resting on old data must not look settled
+        st.h = `On track, as far as ${esc(fmtDay(staleList[0].date))}`;
+        st.cls = 'amber';
+        st.icon = ICON_WARN;
+      }
+    }
+    if (staleSay) { const join = (t) => t + (/[.!?]$/.test(t) ? ' ' : '. ') + staleSay; st.p = join(st.p); st.say = join(st.say); }
+    let heroLabel, top;
+    if (lead) {
+      const over = tlr.over > 0.005;
+      const leadLab = over ? `Over today's ${bare(opening)}` : 'Left for today';
+      const leadFig = bare(over ? tlr.over : tlr.left);
+      top = `<div class="top"><div class="jarcol">${jarSvg('jarHome', pct, { text: true, animate: firstPaint, label: `Jar, ${pct} percent of this month's budget left` })}<div class="jarcap">this month</div></div>
+        <div class="free"><div class="lab">${esc(leadLab)}</div><div id="bigTotal" style="${over ? 'color:var(--amber);' : ''}font-size:${leadFig.length >= 11 ? 24 : leadFig.length >= 9 ? 28 : 34}px">${leadFig}</div>${tl2 ? `<div class="lab">${esc(tl2)}</div>` : ''}</div></div>`;
+      heroLabel = plainText(`${leadLab} ${leadFig}${tl2 ? '. ' + tl2 : ''}. ${st.h}. ${/[.!?]$/.test(st.say) ? st.say : st.say + '.'} ${pd ? pdText + '.' : ''}`);
+    } else {
+      top = `<div class="top">${jarSvg('jarHome', pct, { text: true, animate: firstPaint, label: `Jar, ${pct} percent of this month's budget left` })}
+        <div class="free"><div class="lab">Still free to spend</div><div id="bigTotal" style="font-size:${heroAmt.length >= 11 ? 24 : heroAmt.length >= 9 ? 28 : 34}px">${heroAmt}</div><div class="lab">${heroSub}</div></div></div>`;
+      heroLabel = plainText(`Still free to spend ${heroAmt}, ${heroSub}. ${st.h}. ${/[.!?]$/.test(st.say) ? st.say : st.say + '.'} ${pd ? pdText + '.' : ''}`);
+    }
     hero = `<div class="hero" role="group" aria-label="${esc(heroLabel)}"><div aria-hidden="true" style="display:contents">
-      <div class="top">${jarSvg('jarHome', pct, { text: true, animate: firstPaint, label: `Jar, ${pct} percent of this month's budget left` })}
-        <div class="free"><div class="lab">Still free to spend</div><div id="bigTotal" style="font-size:${heroAmt.length >= 11 ? 24 : heroAmt.length >= 9 ? 28 : 34}px">${heroAmt}</div><div class="lab">${heroSub}</div></div></div>
-      ${paydayRow}
-      <div class="inrow stat ${st.cls}">${st.icon}<div><div class="h">${st.h}</div>${st.day}<div class="p">${st.p}</div>${todayLine}</div></div></div></div>${staleLine}`;
+      ${top}
+      <div class="inrow stat ${st.cls}">${st.icon}<div><div class="h">${st.h}</div>${lead ? '' : st.day}<div class="p">${st.p}</div></div></div>${paydayRow}</div></div>${staleLine}`;
   } else {
     // No budgets in the sheet (or an older one): just the month's total.
     hero = `<div class="hero"><div class="free"><div class="lab">Spent this month</div><div id="bigTotal">${fmt(data.totalMYR)}</div>
-      <div class="lab">day ${data.dayOfMonth} of ${data.daysInMonth}</div></div>${paydayRow}
-      ${plainToday ? `<div class="inrow stat ok"><div><div class="p" style="margin:0">${esc(plainToday)}</div></div></div>` : ''}</div>${staleLine}`;
+      <div class="lab">day ${data.dayOfMonth} of ${data.daysInMonth}</div></div>
+      ${plainToday ? `<div class="inrow stat ok"><div><div class="p" style="margin:0">${esc(plainToday)}</div></div></div>` : ''}${paydayRow}</div>${staleLine}`;
   }
   // The visually hidden heading gives the hero (and the Tabung row after it) a place in the outline.
   let html = '<h2 class="sr-only">This month</h2>' + hero + `<div class="actions">
@@ -1087,7 +1133,8 @@ function renderOverview() {
   view.innerHTML = html;
   animateFills('view-overview');
   if (firstPaint && !reduceMotion() && !hideOn && $('bigTotal')) {
-    if (bCats.length) { if (left > 0) countUp($('bigTotal'), left, tm ? (v) => workStr(fmtDays(workDays(v, payPerHour))) : fmt); }
+    if (tlr) { const fig = tlr.over > 0.005 ? tlr.over : tlr.left; if (fig > 0) countUp($('bigTotal'), fig, bare); }
+    else if (bCats.length) { if (left > 0) countUp($('bigTotal'), left, tm ? (v) => workStr(fmtDays(workDays(v, payPerHour))) : fmt); }
     else if (data.totalMYR > 0) countUp($('bigTotal'), data.totalMYR);
   }
 
@@ -1110,7 +1157,10 @@ function renderOverview() {
   });
   view.querySelectorAll('.txn[data-recap]').forEach((el) => el.addEventListener('click', openRecapSheet));
   const staleFlag = $('staleFlag');
-  if (staleFlag) staleFlag.addEventListener('click', () => setTab('more')); // the import card is the first thing there
+  if (staleFlag) {
+    const oldest = staleList[0];
+    staleFlag.addEventListener('click', () => { setTab('more'); if (oldest) preselectUploadApp(oldest.key); }); // the import card is the first thing there
+  }
 
   const undoBtn = $('undoBtn');
   if (undoBtn) {
@@ -1246,6 +1296,7 @@ function mountSheet(inner, closeLabel) {
   sheet.innerHTML = `<div class="inner scroll" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">${inner}
     <button class="btn secondary" id="sheetCancel">${closeLabel || 'Close'}</button></div>`;
   sheet.classList.remove('hidden');
+  placeToast();
   // Everything behind the sheet leaves the accessibility tree and tab order.
   $('app').inert = true;
   $('nav').inert = true;
@@ -1383,7 +1434,7 @@ function openRecapSheet() {
   const pot = (name, p) => p ? `<div class="txn"><div style="min-width:0;flex:1"><div class="m">${name}</div>
     <div class="sub">${fmt(p.start)} &rarr; ${fmt(p.end)}</div></div>
     <div class="val${p.delta > 0 ? ' in' : ''}"${p.delta < 0 ? ' style="color:var(--amber)"' : ''}>${p.delta > 0 ? '+' : ''}${fmt(p.delta)}</div></div>` : '';
-  const pots = s ? pot('Buffer', s.buffer) + pot('Emergency Fund', s.ef) : '';
+  const pots = s ? pot('Buffer', s.buffer) + pot('Emergency cushion', s.ef) : '';
   showSheet(`<h2 id="sheetTitle" style="margin:0;font-size:17px;font-weight:700">${esc(r.label)} recap</h2>
     <div style="display:flex;align-items:baseline;gap:8px;margin-top:6px"><div class="num" style="font-size:30px;font-weight:800;letter-spacing:-.6px">${fmt(r.total)}</div>
       <div class="muted" style="font-size:13px">${plural(r.count, 'transaction')}</div></div>${vsLine}
@@ -1420,9 +1471,13 @@ function openCategorySheet(cat) {
   const chartItems = monthItems((h) => h[cat] || 0);
   const chart = colChartHtml('catChart', chartItems, true);
   // This month is the headline; the six-month chart is secondary, under "Earlier months".
-  const headline = `${fmt(total)}<span class="of"> ${cap ? 'of ' + fmt(cap) + ' ' : ''}this month</span>`;
+  // A budgeted category leads with what is LEFT, as the Home row that opened this sheet does.
+  const headline = cap > 0
+    ? (total > cap + 0.005 ? `<span style="color:var(--red)">${fmt(total - cap)} over</span>` : `${fmt(Math.max(0, cap - total))} left`)
+    : `${fmt(total)}<span class="of"> this month</span>`;
+  const catFacts = (cap > 0 ? `${fmt(total)} spent of ${fmt(cap)} this month &middot; ` : '') + plural(rows.length, 'transaction');
   const earlier = chart || histLine ? `<div class="fieldlabel">Earlier months</div>${chart || histLine}` : '';
-  const sheet = showSheet(`${sheetHead(esc(cat), headline, plural(rows.length, 'transaction'))}${trend}${earlier}
+  const sheet = showSheet(`${sheetHead(esc(cat), headline, catFacts)}${trend}${earlier}
     <div style="margin-top:6px">${rows.length ? rows.map((t, i) => txnRow(t, 'data-mi="' + i + '"')).join('')
       : '<div class="muted" style="font-size:14px;padding:14px 0">Nothing yet this month.</div>'}</div>`);
   wireColChart(sheet, 'catChart', chartItems);
@@ -1481,7 +1536,7 @@ async function flipRow(t, after) {
       ? (unset ? 'It will count as money out. It takes the category your rules give this merchant; if no rule knows it, it waits in Review.'
         : `It will count as money out of ${esc(t.category)}.`)
       : (unset ? 'It will count as money back, filed as a refund.'
-        : `It will count as money back and stays in ${esc(t.category)}, so it nets against that envelope.`)),
+        : `It will count as money back and stays in ${esc(t.category)}, so it nets against that budget.`)),
     toSpend ? 'Make it a spend' : 'Make it a refund', null, true);
   if (!yes) return;
   try {
@@ -1764,7 +1819,7 @@ function runAudit() {
     <div class="sub" style="margin-top:-4px">In Actual: Cash ${fmt(a.cashMYR)} &middot; Autolog account ${fmt(a.autologMYR)} &middot; card taps not billed yet ${fmt(a.unbilledMYR)}</div>
     <div class="txn"><div class="m">Gap</div><div class="val" style="color:${tone}">${gap >= 0 ? '+' : ''}${fmt(gap)}</div></div>
     <div style="color:${tone}">${verdict}</div>
-    <div class="muted" style="font-size:12px;margin-top:6px">Actual figures as of ${esc(a.asOf || 'the last sync')} &mdash; anything paid since then shows up as a gap.</div></div>`;
+    <div class="muted" style="font-size:12px;margin-top:6px">Actual figures as of ${esc(a.asOf ? fmtUpdated(a.asOf) : 'the last sync')} &mdash; anything paid since then shows up as a gap.</div></div>`;
 }
 
 // More tab (27 Sep 2026): the monthly/occasional cards, off the daily Home —
@@ -1783,11 +1838,14 @@ function renderMore() {
   // Older backends don't send `coverage` — hide the card entirely then.
   if (data.coverage) {
     const CHANNELS = [['tng', 'TNG eWallet'], ['hsbc', 'HSBC'], ['rhb', 'RHB Card'], ['alipay', 'Alipay']];
+    const staleBy = {};
+    staleSources(snapToday(), data.coverage).forEach((x) => { staleBy[x.key] = x; });
     covHtml = `<div class="card"><h2>Statements synced until</h2><div style="margin-top:4px">` +
       CHANNELS.map(([k, label]) => {
         const d = data.coverage[k];
+        const sx = staleBy[k];
         return `<div class="txn"><div class="m">${label}</div>
-          <div class="val" style="font-weight:600;color:${d ? 'var(--text)' : 'var(--muted)'}">${d ? esc(fmtCoverageDate(d)) : 'no imports yet'}</div></div>`;
+          <div class="val" style="font-weight:600;color:${sx ? 'var(--amber)' : d ? 'var(--text)' : 'var(--muted)'}">${d ? esc(fmtCoverageDate(d)) + (sx ? ` &middot; ${sx.gap} days ago` : '') : 'no imports yet'}</div></div>`;
       }).join('') +
       `</div><div class="muted" style="font-size:12px;margin-top:8px">Newest imported transaction per source &mdash; spends after these dates arrive with your next screenshot/statement drop.</div></div>`;
   }
@@ -1842,11 +1900,11 @@ function renderMore() {
     <div class="muted" style="font-size:12px;margin-top:8px">Used by the Time button on Home to show spending as days of your work (8-hour days). Stays on this phone, never sent anywhere. Clear it to turn Time off.</div>
     <div class="muted" style="font-size:13px;margin-top:18px">How the numbers work</div>
     <ul class="muted" style="font-size:13px;line-height:1.55;margin:6px 0 0;padding-left:18px">
-    <li><b style="color:var(--text)">Still free to spend</b> &mdash; what&rsquo;s left across every budgeted envelope; the daily figure under it divides that by the days left this month (today included). An overspent envelope counts against the others.</li>
-    <li><b style="color:var(--text)">Left for today</b> &mdash; the day&rsquo;s starting figure (the daily figure before today&rsquo;s spending) minus what you&rsquo;ve spent today in budgeted envelopes. Spending in an envelope without a budget doesn&rsquo;t count against it.</li>
-    <li><b style="color:var(--text)">The jar</b> &mdash; filled to the share of this month&rsquo;s budget that is still left, and labelled &ldquo;left&rdquo;. It empties as you spend.</li>
-    <li><b style="color:var(--text)">Budget jars</b> &mdash; each envelope is a jar showing what&rsquo;s left of it: full means untouched, empty means nothing left. Orange water means this month is heading over. An empty red jar marked &ldquo;over&rdquo; means it already is, with a red bar under it that is longer the further over (measured against the envelope&rsquo;s size). A grey jar with a tick is a bill that&rsquo;s already paid, at the bottom. The thin bars under Other spending are only relative to the largest.</li>
-    <li><b style="color:var(--text)">Next payday</b> &mdash; counts down to the day of the month set above, from the date of the latest numbers.</li>
+    <li><b style="color:var(--text)">Left for today</b> &mdash; the big figure on Home. It is the day&rsquo;s starting figure (what&rsquo;s left across your budgets, divided by the days left this month, today included) minus what you&rsquo;ve spent today in budgeted categories. Spending in a category without a budget doesn&rsquo;t count against it. If today has gone past it, Home says &ldquo;Over today&rsquo;s&rdquo; instead.</li>
+    <li><b style="color:var(--text)">Still free to spend</b> &mdash; what&rsquo;s left this month across every budget, in the line under the verdict (it is the big figure when there is no figure for today). An overspent budget counts against the others.</li>
+    <li><b style="color:var(--text)">The jar</b> &mdash; filled to the share of this month&rsquo;s budget that is still left, and labelled &ldquo;this month&rdquo;. It empties as you spend.</li>
+    <li><b style="color:var(--text)">Budget jars</b> &mdash; each budget is a jar showing what&rsquo;s left of it: full means untouched, empty means nothing left. Orange water means this month is heading over. An empty red jar marked &ldquo;over&rdquo; means it already is, with a red bar under it that is longer the further over (measured against the budget&rsquo;s size). A grey jar with a tick is a bill that&rsquo;s already paid, at the bottom. The thin bars under Other spending are only relative to the largest.</li>
+    <li><b style="color:var(--text)">Payday</b> &mdash; the line at the bottom of the top card counts down to the day of the month set above, from the date of the latest numbers.</li>
     <li><b style="color:var(--text)">Tabung</b> &mdash; your savings pots, with the total on Home. Each jar and bar fills toward the pot&rsquo;s target, in gold because it&rsquo;s money; a pot with no target shows a full jar in resting gold. Travel Fund and the Emergency cushion take a target you set on this phone; the Buffer&rsquo;s target is its floor.</li>
     <li><b style="color:var(--text)">The rules</b> &mdash; keyword rules in the sheet&rsquo;s Rules tab pick a category from the merchant name; anything they miss waits in Review.</li>
     <li><b style="color:var(--text)">Buffer floor</b> &mdash; the cushion for one-off shocks (the worst single month seen); salary above plan refills it before anything else.</li></ul></details>`;
@@ -2066,7 +2124,7 @@ function openPaySheet() {
     closeSheet();
     syncHeaderBtns();
     if (data) renderOverview();
-    toast('Time is on — amounts show as days of your work');
+    toast('Time is on: the top card on Home shows your work time');
   };
   sheet.querySelector('#paySave').addEventListener('click', save);
   $('paySheetInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
@@ -2154,7 +2212,7 @@ function openSheet(txns) {
        <div class="chipsep" aria-hidden="true">Suggested &mdash; this merchant is ${esc(suggested)} elsewhere</div>` : '';
   const sheet = mountSheet(`${sheetHead(head, amount, sub)}
     <div class="chips cats" id="catPick" role="group" aria-label="Category">${suggChip}${catChipsHtml(suggested ? cats.filter((c) => c !== suggested) : cats, topCats([]), null)}</div>
-    <div class="muted" style="font-size:12px;margin-top:10px">New envelopes appear here once they&rsquo;re funded in Actual.</div>`, 'Cancel');
+    <div class="muted" style="font-size:12px;margin-top:10px">New categories appear here once they&rsquo;re funded in Actual.</div>`, 'Cancel');
   const holder = sheet.querySelector('#catPick');
   wireMore(holder);
   holder.querySelectorAll('button[data-c]').forEach((b) => {
@@ -2231,6 +2289,7 @@ async function undoCategory(rows) {
 // returning to its drill-down list); otherwise focus goes back to the opener.
 function closeSheet() {
   $('sheet').classList.add('hidden');
+  placeToast();
   $('app').inert = false;
   $('nav').inert = false;
   syncSheetKeyboard(); // a closed sheet carries no keyboard inset
@@ -2330,8 +2389,8 @@ function setAddMode(mode) {
   clearFieldErrors($('addForm')); // the wording differs per mode
   $('addTitle').textContent = addPaid() ? 'Log a repayment' : 'Log a spend';
   $('addSave').textContent = addSaveLabel();
-  $('addMerchant').placeholder = addPaid() ? 'What for (optional), e.g. Ali dinner' : 'Merchant';
-  $('catLabel').textContent = addPaid() ? 'Envelope you paid it from — required' : 'Category — optional, the rules decide';
+  $('addMerchant').placeholder = addPaid() ? 'What for, e.g. Ali dinner' : 'Merchant';
+  $('catLabel').textContent = addPaid() ? 'Category it came from — required' : 'Category — optional, the rules decide';
   $('frontLabel').textContent = addPaid() ? 'Who paid you back?' : 'Paid for someone? (optional)';
   // Paid back starts with "who": picking the name fills amount, label and
   // envelope. A spend keeps it as an optional extra below the category.
@@ -2403,8 +2462,14 @@ function fillAddChips(select) {
   const selected = select !== undefined ? select : selectedAddCat();
   const cats = pickableCats(false);
   if (selected && !cats.includes(selected) && !NOT_PICKABLE[selected]) cats.push(selected);
+  const moreWasOpen = !!holder.querySelector('.chips-more:not(.hidden)'); // a refresh must not re-collapse it
   holder.innerHTML = catChipsHtml(cats, topCats(), selected);
   wireMore(holder);
+  if (moreWasOpen) {
+    const more = holder.querySelector('.more');
+    const rest = holder.querySelector('.chips-more');
+    if (more && rest) { more.classList.add('hidden'); more.setAttribute('aria-expanded', 'true'); rest.classList.remove('hidden'); }
+  }
   holder.querySelectorAll('button[data-c]').forEach((b) => {
     b.addEventListener('click', () => {
       const was = b.classList.contains('sel');
@@ -2435,7 +2500,7 @@ function fillNameChips() {
     $('addFronted').value = f.name;
     holder.querySelectorAll('button').forEach((x) => { x.classList.toggle('sel', x === b); x.setAttribute('aria-pressed', String(x === b)); });
     if (addPaid()) {
-      if (!$('addAmount').value) $('addAmount').value = String(f.outstandingMYR);
+      if (!$('addAmount').value) $('addAmount').value = Number(f.outstandingMYR).toFixed(2);
       if (!$('addMerchant').value) $('addMerchant').value = 'Repayment - ' + f.name;
       const last = (data.monthRows || []).filter((t) => t.fronted && t.fronted.toLowerCase() === f.name.toLowerCase() && t.amountMYR > 0)[0];
       if (last && !selectedAddCat()) fillAddChips(last.category);
@@ -2471,7 +2536,7 @@ function fillRecentChips() {
       // row's sign into the mode (else "+45 Food" would log as a spend).
       setAddMode(t.amountMYR !== null && t.amountMYR < 0 ? 'paid' : 'spend');
       $('addMerchant').value = t.merchant;
-      $('addAmount').value = t.amountMYR !== null ? String(Math.abs(t.amountMYR)) : '';
+      $('addAmount').value = t.amountMYR !== null ? Math.abs(t.amountMYR).toFixed(2) : '';
       $('addCurrency').value = 'MYR';
       $('addFronted').value = t.fronted || '';
       fillAddChips(t.category); // any category, even one outside the chip pool (Family)
@@ -2624,7 +2689,7 @@ function renderImportSummary(s) {
     const r = added[i];
     return `<div class="txn imported" data-ai="${i}">${catIcon(r.category)}<div style="min-width:0;flex:1">
       <div class="m">${esc(r.merchant)}</div>
-      <div class="sub">${esc(fmtDay(r.date))} &middot; ${esc(r.category)}</div>
+      <div class="sub">${esc(fmtDay(r.date))} &middot; ${esc(catLabel(r.category))}</div>
       ${flags[i] ? `<div class="flag">${flags[i]}</div>` : ''}</div>
       <div class="val${r.amountMYR < 0 ? ' in' : ''}">${r.amountMYR === null ? '—' : r.amountMYR < 0 ? '+' + fmt(-r.amountMYR) : fmt(r.amountMYR)}</div>
       <div class="rowacts">${r.credit && flippable(r) ? `<button type="button" data-flip="${i}" aria-label="Flip ${esc(r.merchant)} to a spend">Flip</button>` : ''}${r.amountMYR !== null ? `<button type="button" data-fix="${i}" aria-label="Fix amount for ${esc(r.merchant)}">Fix</button>` : ''}
@@ -2648,7 +2713,7 @@ function renderImportSummary(s) {
       const val = row.querySelector('.val');
       val.textContent = res.amountMYR < 0 ? '+' + fmt(-res.amountMYR) : fmt(res.amountMYR);
       val.classList.toggle('in', res.amountMYR < 0);
-      row.querySelector('.sub').textContent = fmtDay(r.date) + ' · ' + res.category;
+      row.querySelector('.sub').textContent = fmtDay(r.date) + ' · ' + catLabel(res.category);
       const f = row.querySelector('.flag');
       if (f) f.remove();
       b.textContent = 'Flipped';
@@ -2680,6 +2745,13 @@ function syncUploadBtn() {
   if (btn.dataset.busy) return;
   btn.disabled = !folder || !n;
   btn.textContent = !folder ? 'Pick the app first' : !n ? 'Choose screenshots first' : `Upload & process ${plural(n, 'screenshot')}`;
+}
+// Picks an app chip in the import card (same path as tapping it, so the choice is remembered
+// and the upload button updates). Home's stale strip uses it; keys are the UPLOAD_FOLDERS values.
+function preselectUploadApp(key) {
+  const chips = $('uploadChips');
+  const chip = chips && chips.querySelector(`button[data-f="${key}"]`);
+  if (chip && !chip.classList.contains('sel')) chip.click();
 }
 function wireUpload() {
   const chips = $('uploadChips');
@@ -2751,7 +2823,7 @@ async function saveQuickAdd() {
     if (paidback) msg = `Paid back ${amtText} into ${cat}`;
     else if (cat && (data && data.budgets || {})[cat] > 0 && fields.currency === 'MYR') {
       const leftNow = data.budgets[cat] - ((data.byCat || {})[cat] || 0) - value;
-      msg = `Logged ${amtText} · ${cat} ${leftNow >= 0 ? fmt(leftNow) + ' left' : fmt(-leftNow) + ' over'}`;
+      msg = `Logged ${amtText} · ${cat} ${leftNow >= 0 ? fmt(leftNow) + '\u00a0left' : fmt(-leftNow) + '\u00a0over'}`; // textContent: nbsp keeps the figure with its word
     } else if (cat) msg = `Logged ${amtText} · ${cat}`;
     else msg = `Logged ${amtText} at ${merchant} · category by the rules`;
     if (r.dedup) msg += ' (already logged)';
@@ -2937,7 +3009,7 @@ if (typeof document !== 'undefined') boot();
 // Test hook: lets Node require() the pure helpers (see test/app.test.js). No effect in the browser.
 if (typeof module !== 'undefined') module.exports = {
   fmt, amountValue, fmtDay, fmtCoverageDate, plural, esc, isoDayNum, friendly, TIMEOUT_MSG, WRITE_TIMEOUT_MSG,
-  parseConnect, snapToday, staleCaptureText, todaySpend, paceColor, barColor, amountFlag, importFlag, flippable,
+  parseConnect, snapToday, staleCaptureText, staleSources, todaySpend, paceColor, barColor, amountFlag, importFlag, flippable,
   monthItems, monthTotalItems, versusPrev, suggestCategory, topCats, canonCats, pickableCats, srcLabel, fmtUpdated,
   workDays, workTime, fmtDays, migratePay, resolveTheme, PREF, nextPayday, potsFor, fmtWhole, maskText,
   budgetBar, budgetJar, jarSvg, todayLeft, amountProblem, addErrors, catLabel, jarWaterY, kbInset, fmtSigned,

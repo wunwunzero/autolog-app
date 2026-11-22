@@ -56,7 +56,7 @@
       --toast: #10231D; --toast-ink: #FFFFFF; --toast-act: #8FD9B8; --skel-a: #E6EEEA; --skel-b: #F3F7F4;
       --green: #14594A; --amber: #8A4600; --red: #A8261C; --blue: #14594A;
       --accent: #14594A; --accent-ink: #FFFFFF; --badge: #A8261C; --badge-ink: #FFFFFF; --placeholder: #55675F;
-      --bar: #7C9A8E; --amber-bar: #D9792B; --red-bar: #C4382C; --over-track: #F6DEDA; --seg-thumb: #FFFFFF;
+      --bar: #6A897C; --amber-bar: #D9792B; --red-bar: #C4382C; --over-track: #F6DEDA; --seg-thumb: #FFFFFF;
       --mint: #DCEFE5; --mint-line: #BFDFCF; --mint-in: #F6FBF8; --mint-ink: #0F4A3D; --mint-text: #35584C; --mint-body: #2B4239;
       --hero-ink: #0F4A3D; --icon: #14594A; --navon: #DCEFE5; --mintbtn: #E8F4EE; --mintbtn-line: #BFDFCF; --rbtn-line: #D5E2DB;
       --jar-glass: #FFFFFF; --jar-text: #14594A; --jar-idle: #A9822A;
@@ -267,6 +267,8 @@
   label.btn { display: block; text-align: center; }
   .btn.quiet { background: var(--fill2); color: var(--text); }
   .btn:disabled { opacity: .4; }
+  /* The import button's disabled state carries its instruction ("Pick the app first"), so it stays readable. */
+  #uploadBtn:disabled { opacity: 1; background: var(--fill); color: var(--muted); box-shadow: none; }
   .hidden { display: none !important; }
   /* Header: month + review pill, big title, three round controls. */
   /* Two rows: month + review pill across the full width (so they never wrap onto
@@ -306,13 +308,6 @@
   .hero .lab { font-size: 14px; font-weight: 600; color: var(--mint-text); }
   #bigTotal { font-size: 34px; font-weight: 800; letter-spacing: -1px; line-height: 1.1; color: var(--hero-ink); overflow-wrap: anywhere; }
   .inrow { background: var(--mint-in); border-radius: 18px; padding: 12px 14px; display: flex; align-items: center; gap: 12px; }
-  .inrow .tile { width: 40px; height: 40px; border-radius: 12px; background: var(--mint); display: flex; align-items: center; justify-content: center; color: var(--icon); flex: none; }
-  .inrow .tile svg, .inrow .stat svg { width: 20px; height: 20px; }
-  .inrow .grow { display: flex; flex-direction: column; flex: 1; min-width: 0; }
-  .inrow .small { font-size: 13px; font-weight: 600; color: var(--mint-text); }
-  .inrow .big { font-size: 18px; font-weight: 800; color: var(--text); }
-  .inrow .right { display: flex; flex-direction: column; align-items: flex-end; flex: none; }
-  .inrow .right .d { font-size: 16px; font-weight: 800; color: var(--mint-ink); }
   .inrow.stat { align-items: flex-start; }
   .inrow.stat > svg { width: 24px; height: 24px; flex: none; margin-top: 2px; }
   .inrow.stat .h { font-size: 16px; font-weight: 800; color: var(--mint-ink); }
@@ -323,11 +318,12 @@
   .inrow.stat .day { font-size: 26px; font-weight: 800; letter-spacing: -.5px; line-height: 1.15; color: var(--text); margin-top: 3px; }
   .inrow.stat .day span { font-size: 15px; font-weight: 700; letter-spacing: 0; color: var(--mint-text); }
   .inrow.stat .p { font-size: 14px; font-weight: 500; line-height: 1.4; color: var(--mint-body); margin-top: 2px; }
-  /* Can I spend this? The answer line, then the working under it. */
-  .inrow.stat .tdy { margin-top: 8px; }
-  .inrow.stat .tl { font-size: 15px; font-weight: 700; line-height: 1.35; color: var(--text); }
-  .inrow.stat .tl.warn { color: var(--amber); }
-  .inrow.stat .ts { font-size: 13px; font-weight: 600; line-height: 1.4; color: var(--mint-text); margin-top: 2px; }
+  /* "Left for today" leads: the jar sits in a column with a caption so it is not read as today's figure. */
+  .hero .jarcol { flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .hero .jarcap { font-size: 12px; font-weight: 600; color: var(--mint-text); text-align: center; }
+  /* Payday: one muted line at the foot of the hero. */
+  .hero .payline { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--mint-text); }
+  .hero .payline svg { width: 16px; height: 16px; flex: none; }
   .jar-lid { fill: var(--icon); }
   .jar-glass { fill: var(--jar-glass); }
   .jar-water { fill: var(--gold); transition: transform .8s cubic-bezier(.22,.9,.34,1); }
@@ -476,7 +472,7 @@
         <li>Same pipeline as Apple Pay taps &mdash; dedup, alerts and budgets included.</li>
         <li>No category? The rules decide, or it lands in Review.</li>
         <li>Paid for a friend? Put their name in &ldquo;Paid for someone&rdquo; &mdash; Home&rsquo;s Owed card tracks it.</li>
-        <li>They paid you back? Switch to <b>Paid back</b>, pick their name and the envelope you paid from &mdash; the repayment nets it.</li>
+        <li>They paid you back? Switch to <b>Paid back</b>, pick their name and the category it came from &mdash; the repayment nets it.</li>
       </ul></details>
     </div>
   </div>
@@ -492,6 +488,6 @@
   <div id="sheet" class="hidden"></div>
   <div id="toast" role="status" aria-live="polite"></div>
   <!-- bump ?v= on every app.js change: Safari/PWA caches are sticky -->
-  <script src="app.js?v=38"></script>
+  <script src="app.js?v=39"></script>
 </body>
 </html>

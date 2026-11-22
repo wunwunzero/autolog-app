@@ -179,6 +179,22 @@ t('staleCaptureText: missing coverage / null channel / no clock', () => {
   eq(withData(snap(null, null), A.staleCaptureText), null);
   eq(withData({ coverage: { tng: '2026-01-01' } }, A.staleCaptureText), null);                  // no generatedAt
 });
+t('staleSources: none stale, or no clock / no coverage, gives an empty list', () => {
+  assert.deepStrictEqual(A.staleSources('2026-08-28', { tng: '2026-08-27', hsbc: '2026-08-21' }), []);
+  assert.deepStrictEqual(A.staleSources(null, { tng: '2026-01-01' }), []);
+  assert.deepStrictEqual(A.staleSources('2026-08-28', null), []);
+  assert.deepStrictEqual(A.staleSources('2026-08-28', { tng: null }), []);
+});
+t('staleSources: one stale source carries key, label, gap and its date', () => {
+  assert.deepStrictEqual(A.staleSources('2026-08-28', { tng: '2026-08-28', hsbc: '2026-08-10' }),
+    [{ key: 'hsbc', label: 'HSBC', gap: 18, date: '2026-08-10' }]);
+  assert.deepStrictEqual(A.staleSources('2026-08-28', { tng: '2026-08-20', hsbc: '2026-08-28' }).length, 1); // 8 days is stale
+});
+t('staleSources: two stale sources come back oldest first, whatever the channel order', () => {
+  assert.deepStrictEqual(A.staleSources('2026-08-28', { tng: '2026-08-10', hsbc: '2026-08-01' }).map((x) => x.key), ['hsbc', 'tng']);
+  assert.deepStrictEqual(A.staleSources('2026-08-28', { tng: '2026-08-01', hsbc: '2026-08-10' }).map((x) => x.key), ['tng', 'hsbc']);
+  assert.deepStrictEqual(A.staleSources('2026-08-28', { tng: '2026-08-01', hsbc: '2026-08-10', rhb: '2020-01-01' }).length, 2); // rhb never counts
+});
 t('staleCaptureText: rhb and alipay never trigger it', () => {
   eq(withData({ generatedAt: '2026-08-28 09:00', coverage: { tng: '2026-08-28', hsbc: '2026-08-28', rhb: '2025-01-01', alipay: '2025-01-01' } }, A.staleCaptureText), null);
 });
@@ -333,11 +349,11 @@ t('addErrors: Spend asks for amount then merchant, in page order', () => {
   eq(A.addErrors({ amount: '12', merchant: 'Shop', paid: false }).length, 0);
   eq(A.addErrors({ amount: '12', merchant: ' ', paid: false })[0].msg, 'Add a merchant, e.g. Starbucks');
 });
-t('addErrors: Paid back asks for amount, what-for and envelope; the name is optional and no message says "merchant"', () => {
+t('addErrors: Paid back asks for amount, what-for and category; the name is optional and no message says "merchant"', () => {
   const e = A.addErrors({ amount: '', merchant: '', paid: true, who: '', cat: undefined, hasNames: true });
   eq(e.map((x) => x.id).join(), 'addAmount,addMerchant,addChips');
   eq(e[1].msg, 'Say what it was for, e.g. Ali dinner');
-  eq(e[2].msg, 'Pick the envelope you paid it from');
+  eq(e[2].msg, 'Pick the category it came from');
   assert.ok(!e.some((x) => /merchant/i.test(x.msg)));
   // Money back with no person attached (selling something, a cash refund) is a real entry.
   eq(A.addErrors({ amount: '5', merchant: 'Sold old bag', paid: true, who: '', cat: 'Shopping' }).length, 0);
