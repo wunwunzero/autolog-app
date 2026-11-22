@@ -39,7 +39,7 @@
     --bg: #0D1411; --text: #E9F2ED; --muted: #A3B8AE; --fill: #2A3A34; --fill2: #34463F;
     --group: #17211D; --card-line: #26352F; --chip-line: #2E4A3F;
     --sheet: #17211D; --nav: #17211D; --nav-shadow: rgba(0,0,0,.5); --hair: #26352F; --input: #17211D; --scrim: rgba(0,0,0,.6);
-    --toast: #26352F; --toast-ink: #E9F2ED; --toast-act: #8FD9B8; --skel-a: #1F2D27; --skel-b: #2A3A34; --tick: #E9F2ED;
+    --toast: #26352F; --toast-ink: #E9F2ED; --toast-act: #8FD9B8; --skel-a: #1F2D27; --skel-b: #2A3A34;
     --green: #8FD9B8; --amber: #F5A965; --red: #FF9B8C; --blue: #8FD9B8;
     --accent: #8FD9B8; --accent-ink: #0D1411; --badge: #FF9B8C; --badge-ink: #2A0A05; --placeholder: #A3B8AE;
     --gold: #EDB63C; --gold-ink: #2A1E00;
@@ -53,7 +53,7 @@
   :root[data-theme="light"] { color-scheme: light; --bg: #F3F7F4; --text: #10231D; --muted: #4D6159; --fill: #E6EEEA; --fill2: #D5E2DB;
       --group: #FFFFFF; --card-line: #DFE9E4; --chip-line: #D5E2DB;
       --sheet: #FFFFFF; --nav: #FFFFFF; --nav-shadow: rgba(16,35,29,.12); --hair: #E3ECE7; --input: #FFFFFF; --scrim: rgba(16,35,29,.4);
-      --toast: #10231D; --toast-ink: #FFFFFF; --toast-act: #8FD9B8; --skel-a: #E6EEEA; --skel-b: #F3F7F4; --tick: #10231D;
+      --toast: #10231D; --toast-ink: #FFFFFF; --toast-act: #8FD9B8; --skel-a: #E6EEEA; --skel-b: #F3F7F4;
       --green: #14594A; --amber: #8A4600; --red: #A8261C; --blue: #14594A;
       --accent: #14594A; --accent-ink: #FFFFFF; --badge: #A8261C; --badge-ink: #FFFFFF; --placeholder: #55675F;
       --bar: #7C9A8E; --amber-bar: #D9792B; --red-bar: #C4382C; --over-track: #F6DEDA; --seg-thumb: #FFFFFF;
@@ -94,16 +94,13 @@
   .barrow .amt { font-size: 15px; font-weight: 700; white-space: nowrap; }
   .track { position: relative; background: var(--fill); border-radius: 4px; height: 8px; margin-top: 8px; overflow: hidden; }
   .track.lg { height: 10px; border-radius: 5px; }
-  /* Budget bars DRAIN (full = untouched). Overspent: a SOLID red bar (--red-bar) whose length is
-     the overspend as a share of the envelope's cap, on a red-tinted track. A fully paid bill has
-     no track at all (its caption says so). Other-spending bars are different (relative to the
-     largest): thinner. */
+  /* Budgets rows show a small JAR per envelope (full = untouched), with no bar. Only an overspent
+     envelope keeps a track: a SOLID red bar (--red-bar) whose length is the overspend as a share
+     of the envelope's cap, on a red-tinted track. Other-spending bars are different (relative to
+     the largest): thinner. */
   .track.over { background: var(--over-track); }
   .track.thin { height: 4px; border-radius: 2px; margin-top: 6px; }
-  .pace { position: absolute; top: 0; width: 2px; height: 100%; background: var(--tick); opacity: .7; }
-  .pacetext { font-size: 12px; font-weight: 600; margin-top: 5px; }
-  .pacetext.paid { display: flex; align-items: center; gap: 5px; margin-top: 3px; }
-  .pacetext.paid svg { width: 14px; height: 14px; flex: none; }
+  .pacetext { font-size: 12px; font-weight: 600; margin-top: 3px; }
   .barrow.tappable:active { opacity: .6; }
   #sheet .inner.scroll { max-height: 82vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   /* On-screen keyboard (visualViewport, set by syncSheetKeyboard): the sheet sits just above it
@@ -336,6 +333,12 @@
   .jar-water { fill: var(--gold); transition: transform .8s cubic-bezier(.22,.9,.34,1); }
   .jar-water.idle { fill: var(--jar-idle); } /* a pot with no target: full, gold at rest, never "empty" */
   .jar-line { fill: none; stroke: var(--icon); stroke-width: 4; }
+  .jar-water.warn { fill: var(--amber-bar); }
+  .jar.over .jar-lid { fill: var(--red-bar); }  .jar.over .jar-line { stroke: var(--red-bar); }  .jar.over .jar-glass { fill: var(--over-track); }
+  .jar.paid .jar-lid { fill: var(--bar); }  .jar.paid .jar-line { stroke: var(--bar); }  .jar.paid .jar-glass { fill: var(--fill); }
+  .jar-mark { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-width: 7; }
+  .jar.over .jar-mark { stroke: var(--red-bar); }  .jar.paid .jar-mark { stroke: var(--muted); }
+  .barrow .jar { flex: none; }
   /* "50%" over "left", pinned in the upper part of the jar (not on the waterline); the glass-coloured
      halo keeps both legible over glass and over water. */
   .jar-pct, .jar-sub { font-weight: 800; fill: var(--jar-text); text-anchor: middle;
@@ -489,6 +492,6 @@
   <div id="sheet" class="hidden"></div>
   <div id="toast" role="status" aria-live="polite"></div>
   <!-- bump ?v= on every app.js change: Safari/PWA caches are sticky -->
-  <script src="app.js?v=37"></script>
+  <script src="app.js?v=38"></script>
 </body>
 </html>

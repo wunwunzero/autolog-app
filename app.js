@@ -16,7 +16,7 @@
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
-const APP_VERSION = 37; // keep in step with index.html's app.js?v=
+const APP_VERSION = 38; // keep in step with index.html's app.js?v=
 // The backend address is fixed and not secret (auth lives in the key), so connecting
 // only truly requires the key itself.
 const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
@@ -586,9 +586,10 @@ async function searchRows(q) {
 
 // Bars and the budget ring render at zero and sweep to their real value on the
 // next frame (CSS transitions do the motion) — the "feels static" fix.
-// opts.cat makes the row tappable (drill-down); opts.pacePct/paceText add the
-// month-end projection tick + caption (backend projByCat: one-offs of RM100+
-// aren't extrapolated, so a paid bill never "paces" over its envelope).
+// opts.cat makes the row tappable (drill-down); opts.paceText adds a caption under the name
+// (for an envelope heading over, the month-end projection: backend projByCat, where one-offs of
+// RM100+ aren't extrapolated, so a paid bill never "paces" over its envelope); opts.lead replaces
+// the category icon (the Budgets rows pass a small jar); opts.noTrack drops the bar.
 // Category identity (style A, 27 Sep 2026): one icon + one iOS system colour per
 // canonical envelope, used everywhere a category appears. Red is deliberately
 // NOT a category colour — it's reserved for "over".
@@ -701,11 +702,10 @@ function barRow(name, right, pct, color, opts) {
   // ("Food, RM104.00 left, heading RM20.00 over at this pace").
   const label = `${name}, ${right.replace(/&[a-z]+;/g, ' ')}${opts.paceText ? ', ' + opts.paceText : ''}`;
   return `<div class="barrow${opts.cat ? ' tappable' : ''}"${opts.cat ? ` data-cat="${esc(opts.cat)}" role="button" tabindex="0" aria-label="${esc(label)}"` : ''}>
-    ${catIcon(name)}<div class="mid">
+    ${opts.lead || catIcon(name)}<div class="mid">
     <div class="top"><span class="name">${esc(name)}</span><span class="amt" style="${opts.amtColor ? 'color:' + opts.amtColor : ''}">${right}</span></div>
-    ${opts.noTrack ? '' : `<div class="track${opts.trackCls ? ' ' + opts.trackCls : ''}" aria-hidden="true"><div class="fill" style="width:${pct}%;background:${color}" data-w="${pct}"></div>
-    ${opts.pacePct !== undefined ? `<div class="pace" style="left:calc(${opts.pacePct}% - 1px)"></div>` : ''}</div>`}
-    ${opts.paceText ? `<div class="pacetext${opts.paceCls ? ' ' + opts.paceCls : ''}" style="color:${opts.paceColor || 'var(--muted)'}">${opts.paceIcon || ''}${opts.paceText}</div>` : ''}</div>${opts.cat ? '<span class="chev" aria-hidden="true">&rsaquo;</span>' : ''}</div>`;
+    ${opts.noTrack ? '' : `<div class="track${opts.trackCls ? ' ' + opts.trackCls : ''}" aria-hidden="true"><div class="fill" style="width:${pct}%;background:${color}" data-w="${pct}"></div></div>`}
+    ${opts.paceText ? `<div class="pacetext" style="color:${opts.paceColor || 'var(--muted)'}">${opts.paceText}</div>` : ''}</div>${opts.cat ? '<span class="chev" aria-hidden="true">&rsaquo;</span>' : ''}</div>`;
 }
 
 function animateFills(rootId) {
@@ -791,7 +791,6 @@ const ICON_PLUS = ICON('<path d="M12 5v14M5 12h14"/>', 2.2);
 const ICON_SHOTS = ICON('<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-8 9"/>');
 const ICON_OK = ICON('<circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.8 2.8L16 9.5"/>');
 const ICON_WARN = ICON('<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5M12 16h.01"/>');
-const ICON_CHECK = ICON('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 2.4);
 const ICON_STOP = ICON('<circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/>');
 const plainText = (h) => String(h).replace(/<[^>]*>/g, '').replace(/&middot;/g, '.').replace(/&mdash;/g, '-').replace(/&rsquo;/g, "'").replace(/&[a-z]+;/g, ' ').replace(/\s+\./g, '.').replace(/\.{2,}/g, '.').replace(/\s+/g, ' ').trim();
 
@@ -830,12 +829,17 @@ function jarSvg(id, pct, opts) {
   const p = opts.noTarget ? 100 : pct === null || pct === undefined ? 0 : Math.max(0, Math.min(100, Math.round(pct)));
   const y = jarWaterY(p);
   const start = opts.animate && !reduceMotion() ? JAR_SHAPE.h : y;
-  return `<svg class="jar" role="img" aria-label="${esc(opts.label || ('Jar ' + p + ' percent full'))}" width="${w}" height="${Math.round(w * 120 / 104)}" viewBox="0 0 104 120">
+  const toneCls = opts.tone === 'over' || opts.tone === 'paid' ? ' ' + opts.tone : '';
+  const a11y = opts.decorative ? 'aria-hidden="true"' : `role="img" aria-label="${esc(opts.label || ('Jar ' + p + ' percent full'))}"`;
+  const mark = opts.mark === 'over' ? '<path class="jar-mark" d="M52 50v26M52 88v.5"/>'
+    : opts.mark === 'paid' ? '<path class="jar-mark" d="M34 70l12 12 24-26"/>' : '';
+  return `<svg class="jar${toneCls}" ${a11y} width="${w}" height="${Math.round(w * 120 / 104)}" viewBox="0 0 104 120">
     <defs><clipPath id="${esc(id)}"><rect x="12" y="26" width="80" height="88" rx="20"/></clipPath></defs>
     <rect class="jar-lid" x="32" y="6" width="40" height="14" rx="5"/>
     <rect class="jar-glass" x="12" y="26" width="80" height="88" rx="20"/>
-    <g clip-path="url(#${esc(id)})"><rect class="jar-water${opts.noTarget ? ' idle' : ''}" x="12" y="26" width="80" height="88" data-y="${y}" style="transform:translateY(${start}px)"/></g>
+    <g clip-path="url(#${esc(id)})"><rect class="jar-water${opts.noTarget ? ' idle' : ''}${opts.tone === 'warn' ? ' warn' : ''}" x="12" y="26" width="80" height="88" data-y="${y}" style="transform:translateY(${start}px)"/></g>
     <rect class="jar-line" x="12" y="26" width="80" height="88" rx="20"/>
+    ${mark}
     ${opts.text ? `<text class="jar-pct" x="52" y="60">${p}%</text><text class="jar-sub" x="52" y="75">left</text>` : ''}</svg>`;
 }
 // Every pot bar is gold: gold = money, and a pot's jar and its bar then match.
@@ -864,6 +868,15 @@ function budgetBar(spent, cap, projected, fixed) {
   if (proj > c + 1) return { leftPct, tickPct: fixed ? null : 0, state: 'heading', overPct: 0 };
   if (fixed) return { leftPct: sp >= c - 0.5 && sp > 0 ? 0 : leftPct, tickPct: null, state: sp >= c - 0.5 && sp > 0 ? 'paid' : 'ok', overPct: 0 };
   return { leftPct, tickPct: proj > sp + 0.5 ? clampPct((1 - proj / c) * 100) : null, state: 'ok', overPct: 0 };
+}
+// How an envelope's small jar looks on Home, from a budgetBar() result. Pure.
+//   pct: water level 0-100 (what is LEFT; a sliver, never under 6, while anything is left)
+//   tone: 'ok' | 'warn' (heading over) | 'over' | 'paid'; mark: 'over' | 'paid' | null (drawn in the glass)
+function budgetJar(bb) {
+  if (bb.state === 'over') return { pct: 0, tone: 'over', mark: 'over' };
+  if (bb.state === 'paid') return { pct: 0, tone: 'paid', mark: 'paid' };
+  const pct = bb.leftPct > 0 && bb.leftPct < 6 ? 6 : Math.round(bb.leftPct);
+  return { pct, tone: bb.state === 'heading' ? 'warn' : 'ok', mark: null };
 }
 // "Can I spend this?" The day's opening figure (the daily figure before today's spending) minus
 // today's spend in budgeted envelopes: { left } floored at 0, or { over } when today already
@@ -1016,28 +1029,32 @@ function renderOverview() {
     // Riskiest first; a fixed bill that is already paid goes to the bottom (stable otherwise).
     }).sort((a, b) => (a.bb.state === 'paid') - (b.bb.state === 'paid') || b.rank - a.rank);
     html += `<div class="card list"><h2>Budgets</h2>` +
-      rows.map((x) => {
+      rows.map((x, i) => {
         const bb = x.bb;
-        const opts = { cat: x.c };
-        // Bars drain: the fill is what is LEFT. Neutral while on track; orange when the month is
-        // heading over (projection passes the cap); overspent = a SOLID red bar whose length is
-        // the overspend as a share of the cap, on a red-tinted track; a paid fixed bill has no bar.
-        let fill = 'var(--bar)';
-        if (bb.state === 'over') { fill = 'var(--red-bar)'; opts.amtColor = 'var(--red)'; opts.trackCls = 'over'; }
-        else if (bb.state === 'heading') {
-          fill = 'var(--amber-bar)';
+        const j = budgetJar(bb);
+        const opts = { cat: x.c, noTrack: true };
+        opts.lead = jarSvg('jarB-' + i, j.pct, { w: 40, decorative: true, tone: j.tone === 'ok' ? undefined : j.tone, mark: j.mark || undefined, animate: firstPaint });
+        let right, fill = 'var(--bar)', w = 0;
+        if (bb.state === 'over') { // an empty red jar plus the sized solid red bar under the name
+          right = `${fmt(x.s - x.cap)} over`;
+          opts.amtColor = 'var(--red)';
+          opts.noTrack = false;
+          opts.trackCls = 'over';
+          fill = 'var(--red-bar)';
+          w = Math.round(bb.overPct);
+        } else if (bb.state === 'heading') {
+          right = `${fmt(x.cap - x.s)} left`;
           opts.amtColor = 'var(--amber)';
           opts.paceColor = 'var(--amber)';
           opts.paceText = `heading ${fmt(x.proj - x.cap)} over at this pace`;
-        } else if (bb.state === 'paid') { // muted, not a warning: no track, a caption with a small check
-          opts.paceText = 'paid for the month';
-          opts.paceIcon = ICON_CHECK;
-          opts.paceCls = 'paid';
-          opts.noTrack = true;
+        } else if (bb.state === 'paid') {
+          right = 'paid';
+          opts.amtColor = 'var(--muted)';
+          opts.paceText = `${fmtWhole(x.cap)} for the month`;
+        } else {
+          right = `${fmt(x.cap - x.s)} left`;
+          opts.paceText = x.s < 0.005 ? `of ${fmtWhole(x.cap)}, untouched` : `of ${fmtWhole(x.cap)}`;
         }
-        if (bb.tickPct !== null) opts.pacePct = bb.tickPct;
-        const right = bb.state === 'over' ? `${fmt(x.s - x.cap)} over` : `${fmt(x.cap - x.s)} left`;
-        const w = bb.state === 'over' ? Math.round(bb.overPct) : bb.leftPct > 0 ? Math.max(2, Math.round(bb.leftPct)) : 0;
         return barRow(x.c, right, w, fill, opts);
       }).join('') + `</div>`;
   }
@@ -1828,10 +1845,9 @@ function renderMore() {
     <li><b style="color:var(--text)">Still free to spend</b> &mdash; what&rsquo;s left across every budgeted envelope; the daily figure under it divides that by the days left this month (today included). An overspent envelope counts against the others.</li>
     <li><b style="color:var(--text)">Left for today</b> &mdash; the day&rsquo;s starting figure (the daily figure before today&rsquo;s spending) minus what you&rsquo;ve spent today in budgeted envelopes. Spending in an envelope without a budget doesn&rsquo;t count against it.</li>
     <li><b style="color:var(--text)">The jar</b> &mdash; filled to the share of this month&rsquo;s budget that is still left, and labelled &ldquo;left&rdquo;. It empties as you spend.</li>
-    <li><b style="color:var(--text)">Budget bars</b> &mdash; each bar is what&rsquo;s left of that envelope: full means untouched, empty means nothing left. Orange means this month is heading over; a solid red bar and &ldquo;over&rdquo; means it already is, and the longer the red bar, the further over (measured against the envelope&rsquo;s size). A paid bill has no bar, just &ldquo;paid for the month&rdquo;, at the bottom. The thin bars under Other spending are only relative to the largest.</li>
+    <li><b style="color:var(--text)">Budget jars</b> &mdash; each envelope is a jar showing what&rsquo;s left of it: full means untouched, empty means nothing left. Orange water means this month is heading over. An empty red jar marked &ldquo;over&rdquo; means it already is, with a red bar under it that is longer the further over (measured against the envelope&rsquo;s size). A grey jar with a tick is a bill that&rsquo;s already paid, at the bottom. The thin bars under Other spending are only relative to the largest.</li>
     <li><b style="color:var(--text)">Next payday</b> &mdash; counts down to the day of the month set above, from the date of the latest numbers.</li>
     <li><b style="color:var(--text)">Tabung</b> &mdash; your savings pots, with the total on Home. Each jar and bar fills toward the pot&rsquo;s target, in gold because it&rsquo;s money; a pot with no target shows a full jar in resting gold. Travel Fund and the Emergency cushion take a target you set on this phone; the Buffer&rsquo;s target is its floor.</li>
-    <li><b style="color:var(--text)">Pace tick</b> &mdash; the small mark on a bar is where it will be at month end if you keep this pace; at the left edge, with &ldquo;heading RM20 over&rdquo;, the projection passes the cap.</li>
     <li><b style="color:var(--text)">The rules</b> &mdash; keyword rules in the sheet&rsquo;s Rules tab pick a category from the merchant name; anything they miss waits in Review.</li>
     <li><b style="color:var(--text)">Buffer floor</b> &mdash; the cushion for one-off shocks (the worst single month seen); salary above plan refills it before anything else.</li></ul></details>`;
   html += `<div class="muted" style="text-align:center;margin-top:20px;font-size:12px">Updated ${esc(fmtUpdated(data.generatedAt))}</div>`;
@@ -2924,6 +2940,6 @@ if (typeof module !== 'undefined') module.exports = {
   parseConnect, snapToday, staleCaptureText, todaySpend, paceColor, barColor, amountFlag, importFlag, flippable,
   monthItems, monthTotalItems, versusPrev, suggestCategory, topCats, canonCats, pickableCats, srcLabel, fmtUpdated,
   workDays, workTime, fmtDays, migratePay, resolveTheme, PREF, nextPayday, potsFor, fmtWhole, maskText,
-  budgetBar, todayLeft, amountProblem, addErrors, catLabel, jarWaterY, kbInset, fmtSigned,
+  budgetBar, budgetJar, jarSvg, todayLeft, amountProblem, addErrors, catLabel, jarWaterY, kbInset, fmtSigned,
   CANON_CATS, __setData: (d) => { data = d; }, __setHide: (v) => { hideOn = !!v; }
 };

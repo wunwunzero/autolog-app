@@ -248,6 +248,33 @@ t('budgetBar: heading over puts the tick at the left edge and keeps the bar (ora
   eq(A.budgetBar(300, 400, 401, false).state, 'ok');                   // within RM1 slack
   eq(A.budgetBar(300, 400, 401.5, false).state, 'heading');
 });
+t('budgetJar: ok and heading keep the level; over and paid are empty with a mark', () => {
+  eq(JSON.stringify(A.budgetJar(A.budgetBar(150, 600, 150, false))), JSON.stringify({ pct: 75, tone: 'ok', mark: null }));
+  eq(JSON.stringify(A.budgetJar(A.budgetBar(300, 400, 520, false))), JSON.stringify({ pct: 25, tone: 'warn', mark: null }));
+  eq(JSON.stringify(A.budgetJar(A.budgetBar(450, 400, 450, false))), JSON.stringify({ pct: 0, tone: 'over', mark: 'over' }));
+  eq(JSON.stringify(A.budgetJar(A.budgetBar(50, 50, 50, true))), JSON.stringify({ pct: 0, tone: 'paid', mark: 'paid' }));
+});
+t('budgetJar: a sliver floors at 6, exact 0 and 100 stay', () => {
+  eq(A.budgetJar({ leftPct: 2, state: 'ok' }).pct, 6);
+  eq(A.budgetJar({ leftPct: 5.9, state: 'heading' }).pct, 6);
+  eq(A.budgetJar({ leftPct: 6, state: 'ok' }).pct, 6);
+  eq(A.budgetJar({ leftPct: 0, state: 'ok' }).pct, 0);
+  eq(A.budgetJar({ leftPct: 100, state: 'ok' }).pct, 100);
+  eq(A.budgetJar({ leftPct: 33.6, state: 'ok' }).pct, 34);
+});
+t('jarSvg: decorative hides from VoiceOver; tone and mark classes; default output unchanged', () => {
+  const plain = A.jarSvg('x', 50);
+  assert.ok(plain.includes('role="img"') && plain.includes('aria-label="Jar 50 percent full"'));
+  assert.ok(plain.includes('class="jar" ') && !plain.includes('jar-mark') && !plain.includes(' warn'));
+  const d = A.jarSvg('x', 50, { decorative: true });
+  assert.ok(d.includes('aria-hidden="true"') && !d.includes('role=') && !d.includes('aria-label'));
+  assert.ok(A.jarSvg('x', 50, { tone: 'warn' }).includes('class="jar-water warn"'));
+  const o = A.jarSvg('x', 0, { tone: 'over', mark: 'over' });
+  assert.ok(o.includes('<svg class="jar over"') && o.includes('d="M52 50v26M52 88v.5"'));
+  const p = A.jarSvg('x', 0, { tone: 'paid', mark: 'paid' });
+  assert.ok(p.includes('<svg class="jar paid"') && p.includes('d="M34 70l12 12 24-26"'));
+  assert.ok(p.indexOf('jar-line') < p.indexOf('jar-mark'));
+});
 t('budgetBar: overspent is an empty bar, no tick', () => {
   const b = A.budgetBar(450, 400, 450, false);
   eq(b.state, 'over'); eq(b.leftPct, 0); eq(b.tickPct, null);
