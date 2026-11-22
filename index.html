@@ -31,7 +31,7 @@
   /* Colour tokens ("the jar" look, v32): a mint palette, dark by default with a
      light override on :root[data-theme="light"] (set by the head script / applyTheme from the Appearance setting). Semantic
      meaning is stable, one job per colour (v35): --gold = money (jar water, pot
-     bars, the two "log" buttons), --amber = a warning orange (heading over, stale
+     bars, the two "log" buttons; --jar-idle = gold at rest, a pot with no target), --amber = a warning orange (heading over, stale
      capture, below the floor), --red over, --green good, --blue link, --accent
      filled control (text on it is --accent-ink), --badge count badge. The -bar
      variants are fills; the plain ones are TEXT colours. */
@@ -46,7 +46,7 @@
     --bar: #6F9084; --amber-bar: #E8893F; --red-bar: #E5564A; --over-track: #3B2220; --seg-thumb: #3A4D45;
     --mint: #163A30; --mint-line: #245244; --mint-in: #1E4539; --mint-ink: #BDEBD5; --mint-text: #B9D3C7; --mint-body: #D6E8DF;
     --hero-ink: #fff; --icon: #8FD9B8; --navon: #1E4539; --mintbtn: #1B2B25; --mintbtn-line: #2E4A3F; --rbtn-line: #26352F;
-    --jar-glass: #1E4539; --jar-text: #E9F2ED;
+    --jar-glass: #1E4539; --jar-text: #E9F2ED; --jar-idle: #BE9226;
     --c-gold: #ffd60a;
     --c-orange: #ff9f0a; --c-green: #30d158; --c-blue: #0a84ff; --c-cyan: #64d2ff; --c-pink: #ff375f; --c-purple: #bf5af2;
     --c-indigo: #5e5ce6; --c-gray: #98989d; --c-brown: #ac8e68; --c-mint: #63e6e2; --c-teal: #40c8e0; }
@@ -59,7 +59,7 @@
       --bar: #7C9A8E; --amber-bar: #D9792B; --red-bar: #C4382C; --over-track: #F6DEDA; --seg-thumb: #FFFFFF;
       --mint: #DCEFE5; --mint-line: #BFDFCF; --mint-in: #F6FBF8; --mint-ink: #0F4A3D; --mint-text: #35584C; --mint-body: #2B4239;
       --hero-ink: #0F4A3D; --icon: #14594A; --navon: #DCEFE5; --mintbtn: #E8F4EE; --mintbtn-line: #BFDFCF; --rbtn-line: #D5E2DB;
-      --jar-glass: #FFFFFF; --jar-text: #14594A;
+      --jar-glass: #FFFFFF; --jar-text: #14594A; --jar-idle: #A9822A;
       --c-gold: #d4a000;
       --c-orange: #ff9500; --c-green: #34c759; --c-blue: #007aff; --c-cyan: #32ade6; --c-pink: #ff2d55; --c-purple: #af52de;
       --c-indigo: #5856d6; --c-gray: #8e8e93; --c-brown: #a2845e; --c-mint: #00c7be; --c-teal: #30b0c7; }
@@ -94,12 +94,16 @@
   .barrow .amt { font-size: 15px; font-weight: 700; white-space: nowrap; }
   .track { position: relative; background: var(--fill); border-radius: 4px; height: 8px; margin-top: 8px; overflow: hidden; }
   .track.lg { height: 10px; border-radius: 5px; }
-  /* Budget bars DRAIN (full = untouched). Overspent: an empty track with a faint red tint.
-     Other-spending bars are a different thing (relative to the largest): thinner. */
+  /* Budget bars DRAIN (full = untouched). Overspent: a SOLID red bar (--red-bar) whose length is
+     the overspend as a share of the envelope's cap, on a red-tinted track. A fully paid bill has
+     no track at all (its caption says so). Other-spending bars are different (relative to the
+     largest): thinner. */
   .track.over { background: var(--over-track); }
   .track.thin { height: 4px; border-radius: 2px; margin-top: 6px; }
   .pace { position: absolute; top: 0; width: 2px; height: 100%; background: var(--tick); opacity: .7; }
   .pacetext { font-size: 12px; font-weight: 600; margin-top: 5px; }
+  .pacetext.paid { display: flex; align-items: center; gap: 5px; margin-top: 3px; }
+  .pacetext.paid svg { width: 14px; height: 14px; flex: none; }
   .barrow.tappable:active { opacity: .6; }
   #sheet .inner.scroll { max-height: 82vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   /* On-screen keyboard (visualViewport, set by syncSheetKeyboard): the sheet sits just above it
@@ -108,6 +112,11 @@
   #sheet.kb .inner.scroll { max-height: min(82vh, calc(var(--vvh, 100vh) - 12px)); }
   #sheet.kb .inner { padding-bottom: 14px; }
   #sheet h2 { margin: 0; }
+  /* One sheet header: title, then the amount large, then one small facts line. */
+  .sheet-title { margin: 0; font-size: 17px; font-weight: 700; }
+  .sheet-amt { font-size: 30px; font-weight: 800; letter-spacing: -.6px; line-height: 1.15; margin-top: 4px; }
+  .sheet-amt .of { font-size: 15px; font-weight: 600; letter-spacing: 0; color: var(--muted); }
+  .sheet-facts { font-size: 13px; color: var(--muted); margin-top: 4px; }
   .fill { height: 100%; border-radius: inherit; transform-origin: left center; transform: scaleX(0); transition: transform .5s cubic-bezier(.22,.9,.34,1); }
   .txn { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--hair); }
   .txn:first-of-type { border-top: 0; padding-top: 2px; }
@@ -174,6 +183,14 @@
   [tabindex="-1"]:focus { outline: none; }
   .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   label.btn:focus-within { outline: 2.5px solid var(--blue); outline-offset: 2px; }
+  /* Form errors sit directly under the field: red text + a small alert icon (never colour alone),
+     a red ring on the field, aria-invalid / aria-describedby set by fieldError() in app.js. */
+  .ferr { display: flex; align-items: flex-start; gap: 6px; margin-top: 6px; font-size: 13px; font-weight: 600; line-height: 1.35; color: var(--red); }
+  .ferr svg { width: 16px; height: 16px; flex: none; margin-top: 1px; }
+  input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--red) !important; box-shadow: 0 0 0 1px var(--red); }
+  .chips.invalid { outline: 2px solid var(--red); outline-offset: 5px; border-radius: 14px; }
+  .emptyico { color: var(--icon); display: inline-flex; }
+  .emptyico svg { width: 44px; height: 44px; }
   .fieldlabel { font-size: 13px; font-weight: 600; color: var(--muted); margin: 16px 0 -6px 2px; }
   label.fieldlabel.stacked { display: block; margin: 0 0 6px 2px; }
   /* More tab: small muted group labels above the cards (not cards themselves). */
@@ -184,7 +201,7 @@
   .catrow .cn { font-size: 15px; font-weight: 600; color: var(--muted); }
   .catrow .cn b { color: var(--text); font-weight: 800; }
   .catrow .cbtn { background: var(--fill); border: 0; color: var(--blue); font: inherit; font-size: 14px; font-weight: 700; border-radius: 14px; padding: 0 16px; min-height: 44px; }
-  .chips.stack button[data-c] { flex: 1 1 100%; text-align: left; }
+  .chips.stack button[data-c], .chips.cats button.wide[data-c] { flex: 1 1 100%; text-align: left; }
   .chips button.sugg, .chips.cats button.sugg[data-c] { flex: 1 1 100%; text-align: left; border-color: var(--accent); }
   /* Spend | Paid back segmented control (Add tab). */
   .seg { display: flex; background: var(--fill); border-radius: 18px; padding: 3px; margin-top: 16px; }
@@ -222,6 +239,7 @@
   .colchart .readout .v { font-size: 20px; font-weight: 800; letter-spacing: -.3px; }
   .colchart .readout .l { font-size: 13px; color: var(--muted); margin-left: 6px; white-space: nowrap; }
   .colchart .readout .avg { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .colchart.secondary .readout .v { font-size: 15px; font-weight: 700; letter-spacing: 0; }
   .colchart .extra { font-size: 12px; color: var(--muted); margin-top: 2px; min-height: 16px; }
   .colchart .plot { display: flex; align-items: stretch; margin-top: 10px; }
   .colchart .col { flex: 1; min-width: 24px; background: none; border: 0; padding: 0; font: inherit; color: var(--muted); display: flex; flex-direction: column; align-items: center; }
@@ -271,10 +289,12 @@
   .rbtn .eye-off { display: none; }
   .rbtn.off .eye { display: none; }
   .rbtn.off .eye-off { display: block; }
-  .timebtn { height: 44px; padding: 0 14px; border-radius: 22px; border: 1.5px solid var(--icon); background: var(--mint); color: var(--mint-ink);
-    display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 700; }
+  /* Time: quiet like the other round controls while off (same surface and border as .rbtn),
+     the filled pill only while on. Shown on Home only (setTab / syncHeaderBtns). */
+  .timebtn { height: 44px; padding: 0 14px; border-radius: 22px; border: 1px solid var(--rbtn-line); background: var(--group); color: var(--icon);
+    display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; margin: 0; }
   .timebtn svg { width: 18px; height: 18px; }
-  .timebtn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .timebtn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
   #tab-refresh .ico { display: inline-flex; width: 22px; height: 22px; align-items: center; justify-content: center; }
   button.pill { border: 0; font-family: inherit; min-height: 30px; position: relative; }
   button.pill::after { content: ''; position: absolute; inset: -7px -4px; } /* 44pt hit area */
@@ -306,11 +326,15 @@
   .inrow.stat .day { font-size: 26px; font-weight: 800; letter-spacing: -.5px; line-height: 1.15; color: var(--text); margin-top: 3px; }
   .inrow.stat .day span { font-size: 15px; font-weight: 700; letter-spacing: 0; color: var(--mint-text); }
   .inrow.stat .p { font-size: 14px; font-weight: 500; line-height: 1.4; color: var(--mint-body); margin-top: 2px; }
-  .inrow.stat .tdy { font-size: 13px; font-weight: 600; color: var(--mint-text); margin-top: 6px; }
+  /* Can I spend this? The answer line, then the working under it. */
+  .inrow.stat .tdy { margin-top: 8px; }
+  .inrow.stat .tl { font-size: 15px; font-weight: 700; line-height: 1.35; color: var(--text); }
+  .inrow.stat .tl.warn { color: var(--amber); }
+  .inrow.stat .ts { font-size: 13px; font-weight: 600; line-height: 1.4; color: var(--mint-text); margin-top: 2px; }
   .jar-lid { fill: var(--icon); }
   .jar-glass { fill: var(--jar-glass); }
   .jar-water { fill: var(--gold); transition: transform .8s cubic-bezier(.22,.9,.34,1); }
-  .jar-water.dim { opacity: .45; } /* a pot with no target: full but faded, never "empty" */
+  .jar-water.idle { fill: var(--jar-idle); } /* a pot with no target: full, gold at rest, never "empty" */
   .jar-line { fill: none; stroke: var(--icon); stroke-width: 4; }
   /* "50%" over "left", pinned in the upper part of the jar (not on the waterline); the glass-coloured
      halo keeps both legible over glass and over water. */
@@ -422,7 +446,7 @@
       <div class="card" id="addCard"><h2 id="addTitle">Log a spend</h2>
         <div class="chips hidden" id="recentChips" role="group" aria-label="Repeat a recent quick-add" style="margin-top:0"></div>
         <div id="amountRow" style="display:flex;gap:10px;margin-top:12px">
-          <input type="text" inputmode="decimal" id="addAmount" aria-label="Amount" placeholder="0.00" style="flex:1" autocomplete="off">
+          <input type="text" inputmode="decimal" id="addAmount" aria-label="Amount" placeholder="0.00" style="flex:1" autocomplete="off" data-err-after="amountRow">
           <select id="addCurrency" aria-label="Currency" style="width:96px">
             <option selected>MYR</option><option>SGD</option><option>USD</option><option>THB</option>
             <option>IDR</option><option>VND</option><option>EUR</option><option>GBP</option>
@@ -440,7 +464,7 @@
         <datalist id="frontedNames"></datalist>
         <button type="button" class="linkbtn" id="extraToggle" aria-expanded="false">More options &middot; date, note, paid for someone</button>
         <div id="addExtra" class="hidden" style="display:flex;gap:10px;margin-top:14px">
-          <input type="date" id="addDate" aria-label="Date" style="flex:1">
+          <input type="date" id="addDate" aria-label="Date" style="flex:1" data-err-after="addExtra">
           <input type="text" id="addNote" aria-label="Note" placeholder="Note (optional)" style="flex:1.3" autocomplete="off"></div>
       </div>
       </form>
@@ -465,6 +489,6 @@
   <div id="sheet" class="hidden"></div>
   <div id="toast" role="status" aria-live="polite"></div>
   <!-- bump ?v= on every app.js change: Safari/PWA caches are sticky -->
-  <script src="app.js?v=36"></script>
+  <script src="app.js?v=37"></script>
 </body>
 </html>

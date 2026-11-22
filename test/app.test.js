@@ -254,6 +254,75 @@ t('budgetBar: overspent is an empty bar, no tick', () => {
   eq(A.budgetBar(400, 400, 400, false).state, 'ok');                   // exactly at the cap is not over
   eq(A.budgetBar(400, 400, 400, false).leftPct, 0);
 });
+t('budgetBar: overPct is the overspend as a share of the cap, never under 8, never over 100', () => {
+  eq(A.budgetBar(450, 400, 450, false).overPct, 12.5);                 // RM50 over RM400
+  eq(A.budgetBar(900, 400, 900, false).overPct, 100);                  // RM500 over a RM400 cap: capped at the track
+  eq(A.budgetBar(401, 400, 401, false).overPct, 8);                    // RM1 over: still seen
+  eq(A.budgetBar(450, 450.5, 450, false).overPct, 0);                  // under the cap: not an over bar
+  const small = A.budgetBar(500, 450, 500, false).overPct, big = A.budgetBar(950, 450, 950, false).overPct;
+  assert.ok(small < big, 'RM50 over and RM500 over on one cap must differ');
+  eq(A.budgetBar(950, 450, 950, false).overPct, 100);                  // RM500 over RM450: more than the cap, capped
+  eq(A.budgetBar(300, 400, 520, false).overPct, 0);                    // heading over is not over
+  eq(A.budgetBar(60, 60, 60, true).overPct, 0);                        // paid is not over
+});
+t('budgetBar: overPct with no cap is the full track (or 0 with nothing spent)', () => {
+  eq(A.budgetBar(12, 0, 12, false).overPct, 100);
+  eq(A.budgetBar(0, 0, 0, false).overPct, 0);
+});
+t('todayLeft: opening minus budgeted spend, floored at 0, never both', () => {
+  let r = A.todayLeft(58.44, 42.4);
+  eq(r.left, 16.04); eq(r.over, 0);
+  r = A.todayLeft(58.44, 0);
+  eq(r.left, 58.44); eq(r.over, 0);
+  r = A.todayLeft(58.44, 70.44);
+  eq(r.left, 0); eq(r.over, 12);
+  r = A.todayLeft(58.44, 58.44);
+  eq(r.left, 0); eq(r.over, 0);
+});
+t('todayLeft: float noise and bad input', () => {
+  const r = A.todayLeft(0.3, 0.1 + 0.2);
+  eq(r.left, 0); eq(r.over, 0);                                        // 0.30000000000000004 is not "over"
+  const z = A.todayLeft(undefined, null);
+  eq(z.left, 0); eq(z.over, 0);
+});
+t('amountProblem: missing, not a number, zero', () => {
+  eq(A.amountProblem('', { noun: 'an amount', example: '12.50' }), 'Enter an amount, e.g. 12.50');
+  eq(A.amountProblem('   ', { noun: 'a target' }), 'Enter a target');
+  eq(A.amountProblem('abc', { example: '12.50' }), 'That isn’t a number — try 12.50');
+  eq(A.amountProblem('0'), 'Must be more than 0');
+  eq(A.amountProblem('-5'), 'That isn’t a number');                     // amountValue rejects a minus sign
+  eq(A.amountProblem('12.50'), null);
+  eq(A.amountProblem('1,200'), null);
+});
+t('amountProblem: allowZero is for balances', () => {
+  eq(A.amountProblem('0', { allowZero: true }), null);
+  eq(A.amountProblem('', { noun: 'your RHB balance', allowZero: true }), 'Enter your RHB balance');
+});
+t('addErrors: Spend asks for amount then merchant, in page order', () => {
+  let e = A.addErrors({ amount: '', merchant: '', paid: false });
+  eq(e.map((x) => x.id).join(), 'addAmount,addMerchant');
+  e = A.addErrors({ amount: 'x', merchant: 'Shop', paid: false });
+  eq(e.length, 1); eq(e[0].id, 'addAmount'); eq(e[0].msg, 'That isn’t a number — try 12.50');
+  eq(A.addErrors({ amount: '12', merchant: 'Shop', paid: false }).length, 0);
+  eq(A.addErrors({ amount: '12', merchant: ' ', paid: false })[0].msg, 'Add a merchant, e.g. Starbucks');
+});
+t('addErrors: Paid back asks for amount, what-for and envelope; the name is optional and no message says "merchant"', () => {
+  const e = A.addErrors({ amount: '', merchant: '', paid: true, who: '', cat: undefined, hasNames: true });
+  eq(e.map((x) => x.id).join(), 'addAmount,addMerchant,addChips');
+  eq(e[1].msg, 'Say what it was for, e.g. Ali dinner');
+  eq(e[2].msg, 'Pick the envelope you paid it from');
+  assert.ok(!e.some((x) => /merchant/i.test(x.msg)));
+  // Money back with no person attached (selling something, a cash refund) is a real entry.
+  eq(A.addErrors({ amount: '5', merchant: 'Sold old bag', paid: true, who: '', cat: 'Shopping' }).length, 0);
+  eq(A.addErrors({ amount: '5', merchant: 'Dinner', paid: true, who: 'Ali', cat: 'Food' }).length, 0);
+});
+t('catLabel: backend codes never reach the screen', () => {
+  eq(A.catLabel('TRANSFER'), 'Transfer');
+  eq(A.catLabel('REFUND'), 'Refund');
+  eq(A.catLabel('REVIEW'), 'Needs a category');
+  eq(A.catLabel('DUPLICATE?'), 'Possible duplicate');
+  eq(A.catLabel('Food'), 'Food');
+});
 t('budgetBar: cap 0 never divides by zero', () => {
   let b = A.budgetBar(0, 0, 0, false);
   eq(b.leftPct, 0); eq(b.tickPct, null); eq(b.state, 'ok');

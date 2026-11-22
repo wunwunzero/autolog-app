@@ -16,7 +16,7 @@
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'autolog.cfg';
-const APP_VERSION = 36; // keep in step with index.html's app.js?v=
+const APP_VERSION = 37; // keep in step with index.html's app.js?v=
 // The backend address is fixed and not secret (auth lives in the key), so connecting
 // only truly requires the key itself.
 const DEFAULT_EXEC_URL = 'https://script.google.com/macros/s/AKfycbx3VtjlwOqMmPIP-Wp07x4B0Ns4cGK2wr78cM06nwijUMW3l2yW3_j8z1dZZrYvSvwi/exec';
@@ -319,6 +319,97 @@ function paceColor(spent, proj, cap) {
 }
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
+// ---- Form errors beside the field (v37). One reusable pair: fieldError(el, message) puts the
+// message directly under the field (or under the element named by its data-err-after, e.g. a
+// row the field shares), sets aria-invalid (inputs) and aria-describedby, and rings the field
+// in red; clearFieldError(el) undoes all of it. The error clears by itself as soon as the user
+// types in that field (or, for a chip group, picks a chip). `el` is an input/select or a chip
+// group. Toasts stay for outcomes that happen after a request (saved, undo, network errors).
+const isField = (el) => /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName);
+function clearFieldError(el) {
+  if (!el) return;
+  const st = el._ferr;
+  const box = document.getElementById((el.id || 'field') + 'Err');
+  if (box) box.remove();
+  if (isField(el)) el.removeAttribute('aria-invalid'); else el.classList.remove('invalid');
+  if (st) {
+    if (st.desc) el.setAttribute('aria-describedby', st.desc); else el.removeAttribute('aria-describedby');
+    st.events.forEach((ev) => el.removeEventListener(ev, st.off));
+    delete el._ferr;
+  }
+}
+function clearFieldErrors(root) {
+  (root || document).querySelectorAll('.ferr').forEach((box) => {
+    const el = document.querySelector('[aria-describedby~="' + box.id + '"]');
+    if (el) clearFieldError(el); else box.remove();
+  });
+}
+function fieldError(el, message) {
+  if (!el) return;
+  const id = (el.id || 'field') + 'Err';
+  const group = !isField(el);
+  let box = document.getElementById(id);
+  if (!box) {
+    box = document.createElement('div');
+    box.id = id;
+    box.className = 'ferr';
+    box.setAttribute('role', 'alert');
+    const after = el.dataset && el.dataset.errAfter ? document.getElementById(el.dataset.errAfter) : null;
+    (after || el).insertAdjacentElement('afterend', box);
+  }
+  box.innerHTML = ICON_WARN + '<span></span>';
+  box.lastChild.textContent = message;
+  if (!el._ferr) {
+    const off = (e) => { if (group && !(e.target.closest && e.target.closest('button[data-c]'))) return; clearFieldError(el); };
+    const events = group ? ['click'] : ['input', 'change'];
+    el._ferr = { desc: el.getAttribute('aria-describedby'), off, events };
+    events.forEach((ev) => el.addEventListener(ev, off));
+    el.setAttribute('aria-describedby', [el._ferr.desc, id].filter(Boolean).join(' '));
+  }
+  // aria-invalid is only meaningful on a real field; a chip group is just described.
+  if (group) el.classList.add('invalid'); else el.setAttribute('aria-invalid', 'true');
+}
+// Several at once: [[el, message], ...] in page order; focus goes to the FIRST (a chip group
+// hands it to its first visible chip).
+function showFieldErrors(list) {
+  list = list.filter((x) => x[0]);
+  list.forEach(([el, msg]) => fieldError(el, msg));
+  if (!list.length) return;
+  const first = list[0][0];
+  const target = isField(first) ? first : [...first.querySelectorAll('button')].find((b) => !b.closest('.hidden')) || first;
+  target.focus();
+}
+// The reason an amount a person typed is not acceptable, or null. Pure. `o.noun` carries its
+// own article ("an amount", "your RHB balance"); `allowZero` for balances.
+function amountProblem(raw, o) {
+  o = o || {};
+  const s = String(raw === null || raw === undefined ? '' : raw).trim();
+  const ex = o.example ? ', e.g. ' + o.example : '';
+  if (!s) return 'Enter ' + (o.noun || 'an amount') + ex;
+  const v = amountValue(s);
+  if (!isFinite(v)) return 'That isn’t a number' + (o.example ? ' — try ' + o.example : '');
+  if (v < 0 || (v === 0 && !o.allowZero)) return 'Must be more than 0';
+  return null;
+}
+// The Add form's problems in page order (Paid back puts "who" first), worded for the mode the
+// form is in: a repayment's merchant is "what for" and optional (it defaults to "Repayment -
+// name"), so it is never reported. f = { amount (raw text), merchant, paid, who, cat, hasNames }.
+function addErrors(f) {
+  const errs = [];
+  const bad = amountProblem(f.amount, { noun: 'an amount', example: '12.50' });
+  if (bad) errs.push({ id: 'addAmount', msg: bad });
+  // The same field is "Merchant" for a spend and "What for" for a repayment, so the
+  // message names what that mode shows. WHO paid back stays optional: money back
+  // with no person attached (selling something, a cash refund) is a real entry.
+  if (!String(f.merchant || '').trim()) errs.push({ id: 'addMerchant', msg: f.paid ? 'Say what it was for, e.g. Ali dinner' : 'Add a merchant, e.g. Starbucks' });
+  if (f.paid && !f.cat) errs.push({ id: 'addChips', msg: 'Pick the envelope you paid it from' });
+  return errs;
+}
+// One sheet header: title, the amount large, one small facts line. `title` and `facts` are
+// already-escaped HTML; amountHtml may carry a coloured span.
+const sheetHead = (title, amountHtml, facts) => `<h2 id="sheetTitle" class="sheet-title">${title}</h2>` +
+  (amountHtml ? `<div class="sheet-amt">${amountHtml}</div>` : '') + (facts ? `<div class="sheet-facts">${facts}</div>` : '');
+
 // action {label, run}: an inline button (e.g. Undo) — the toast then stays 6s
 // and takes taps; plain toasts never block what's underneath.
 function hideToast() {
@@ -524,12 +615,18 @@ function catIcon(name, size) {
 // Category chips (critique 29 Sep 2026): icon + name, the 4 likeliest first and
 // the rest behind "More" — ten flat text chips were a scan. A selection hidden
 // in the rest opens the rest.
-function chipHtml(c, selected, label) {
-  return `<button type="button" data-c="${esc(c)}"${selected ? ' class="sel"' : ''} aria-pressed="${selected ? 'true' : 'false'}"><span class="ci" aria-hidden="true">${catOf(c)[0]}</span>${esc(label || c)}</button>`;
+function chipHtml(c, selected, label, extraCls) {
+  const cls = [selected ? 'sel' : '', extraCls || ''].filter(Boolean).join(' ');
+  return `<button type="button" data-c="${esc(c)}"${cls ? ` class="${cls}"` : ''} aria-pressed="${selected ? 'true' : 'false'}"><span class="ci" aria-hidden="true">${catOf(c)[0]}</span>${esc(label || c)}</button>`;
 }
 // TRANSFER/REFUND aren't spending envelopes: they sit last, under their own label.
 const RESERVED_CATS = ['TRANSFER', 'REFUND'];
 const NOT_SPEND_NAME = { TRANSFER: 'Transfer', REFUND: 'Refund' }; // the short names for the values the backend keeps
+// The longer, friendly labels of the two choices, wherever they are offered (still sending TRANSFER / REFUND).
+const NOT_SPEND_CHOICE = { TRANSFER: 'Transfer between my accounts', REFUND: 'Refund / money back' };
+// Backend category codes are never shown to a person: this is the label for display.
+const CAT_LABEL = { TRANSFER: 'Transfer', REFUND: 'Refund', REVIEW: 'Needs a category', 'DUPLICATE?': 'Possible duplicate' };
+const catLabel = (c) => CAT_LABEL[c] || c;
 function catChipsHtml(cats, top, selected) {
   const envelopes = cats.filter((c) => !RESERVED_CATS.includes(c));
   const reserved = cats.filter((c) => RESERVED_CATS.includes(c));
@@ -539,7 +636,7 @@ function catChipsHtml(cats, top, selected) {
   return first.map((c) => chipHtml(c, c === selected)).join('') +
     (rest.length || reserved.length ? `<button type="button" class="more${open ? ' hidden' : ''}" aria-expanded="${open}">More&hellip;</button>
       <div class="chips-more${open ? '' : ' hidden'}">${rest.map((c) => chipHtml(c, c === selected)).join('')}${reserved.length
-        ? `<div class="chipsep">Not spending</div>${reserved.map((c) => chipHtml(c, c === selected)).join('')}` : ''}</div>` : '');
+        ? `<div class="fieldlabel" style="flex-basis:100%;margin:14px 0 -6px 2px">Not a spend</div>${reserved.map((c) => chipHtml(c, c === selected, NOT_SPEND_CHOICE[c], 'wide')).join('')}` : ''}</div>` : '');
 }
 function wireMore(holder) {
   const more = holder.querySelector('.more');
@@ -606,9 +703,9 @@ function barRow(name, right, pct, color, opts) {
   return `<div class="barrow${opts.cat ? ' tappable' : ''}"${opts.cat ? ` data-cat="${esc(opts.cat)}" role="button" tabindex="0" aria-label="${esc(label)}"` : ''}>
     ${catIcon(name)}<div class="mid">
     <div class="top"><span class="name">${esc(name)}</span><span class="amt" style="${opts.amtColor ? 'color:' + opts.amtColor : ''}">${right}</span></div>
-    <div class="track${opts.trackCls ? ' ' + opts.trackCls : ''}" aria-hidden="true"><div class="fill" style="width:${pct}%;background:${color}" data-w="${pct}"></div>
-    ${opts.pacePct !== undefined ? `<div class="pace" style="left:calc(${opts.pacePct}% - 1px)"></div>` : ''}</div>
-    ${opts.paceText ? `<div class="pacetext" style="color:${opts.paceColor || 'var(--muted)'}">${opts.paceText}</div>` : ''}</div>${opts.cat ? '<span class="chev" aria-hidden="true">&rsaquo;</span>' : ''}</div>`;
+    ${opts.noTrack ? '' : `<div class="track${opts.trackCls ? ' ' + opts.trackCls : ''}" aria-hidden="true"><div class="fill" style="width:${pct}%;background:${color}" data-w="${pct}"></div>
+    ${opts.pacePct !== undefined ? `<div class="pace" style="left:calc(${opts.pacePct}% - 1px)"></div>` : ''}</div>`}
+    ${opts.paceText ? `<div class="pacetext${opts.paceCls ? ' ' + opts.paceCls : ''}" style="color:${opts.paceColor || 'var(--muted)'}">${opts.paceIcon || ''}${opts.paceText}</div>` : ''}</div>${opts.cat ? '<span class="chev" aria-hidden="true">&rsaquo;</span>' : ''}</div>`;
 }
 
 function animateFills(rootId) {
@@ -694,6 +791,7 @@ const ICON_PLUS = ICON('<path d="M12 5v14M5 12h14"/>', 2.2);
 const ICON_SHOTS = ICON('<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-8 9"/>');
 const ICON_OK = ICON('<circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.8 2.8L16 9.5"/>');
 const ICON_WARN = ICON('<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5M12 16h.01"/>');
+const ICON_CHECK = ICON('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 2.4);
 const ICON_STOP = ICON('<circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/>');
 const plainText = (h) => String(h).replace(/<[^>]*>/g, '').replace(/&middot;/g, '.').replace(/&mdash;/g, '-').replace(/&rsquo;/g, "'").replace(/&[a-z]+;/g, ' ').replace(/\s+\./g, '.').replace(/\.{2,}/g, '.').replace(/\s+/g, ' ').trim();
 
@@ -702,8 +800,8 @@ const plainText = (h) => String(h).replace(/<[^>]*>/g, '').replace(/&middot;/g, 
 // opts.animate the water rises from empty on the next frame (animateFills). The fill is
 // linear in the jar's AREA (the glass is a rounded rectangle, so equal height steps are not
 // equal amounts of water at the narrow bottom): a 12% pot looks 12% full, like its bar.
-// opts.text adds "NN%" over "left" (the Home jar). opts.noTarget draws the jar full but
-// faded, with no figure: a pot that holds money but has no target must not look empty.
+// opts.text adds "NN%" over "left" (the Home jar). opts.noTarget draws the jar full in resting
+// gold (--jar-idle), with no figure: a pot that holds money but has no target must not look empty.
 const JAR_SHAPE = { w: 80, h: 88, r: 20 };
 function jarWidthAt(t) { // inner width of the glass, t units above its bottom
   const { w, h, r } = JAR_SHAPE;
@@ -736,7 +834,7 @@ function jarSvg(id, pct, opts) {
     <defs><clipPath id="${esc(id)}"><rect x="12" y="26" width="80" height="88" rx="20"/></clipPath></defs>
     <rect class="jar-lid" x="32" y="6" width="40" height="14" rx="5"/>
     <rect class="jar-glass" x="12" y="26" width="80" height="88" rx="20"/>
-    <g clip-path="url(#${esc(id)})"><rect class="jar-water${opts.noTarget ? ' dim' : ''}" x="12" y="26" width="80" height="88" data-y="${y}" style="transform:translateY(${start}px)"/></g>
+    <g clip-path="url(#${esc(id)})"><rect class="jar-water${opts.noTarget ? ' idle' : ''}" x="12" y="26" width="80" height="88" data-y="${y}" style="transform:translateY(${start}px)"/></g>
     <rect class="jar-line" x="12" y="26" width="80" height="88" rx="20"/>
     ${opts.text ? `<text class="jar-pct" x="52" y="60">${p}%</text><text class="jar-sub" x="52" y="75">left</text>` : ''}</svg>`;
 }
@@ -749,19 +847,30 @@ const barWidth = (pct) => Math.max(2, Math.min(100, Math.round(pct)));
 // heading (backend projByCat); the pace tick sits where the bar WILL be at month end
 // (1 - projected/cap), so a tick at the left edge means "heading over". Pure.
 //   state: 'ok' on track · 'heading' projected over the cap · 'over' already overspent
-//          'paid' a fixed bill whose charge has landed (empty, and not a warning).
+//          'paid' a fixed bill whose charge has landed (no bar at all, and not a warning).
 //   leftPct / tickPct are 0-100; tickPct is null when there is no tick (fixed bills never pace).
+//   overPct (0 unless state is 'over'): the overspend as a share of the cap, for the solid red
+//   bar: never under MIN_OVER_PCT (so a small overspend is still seen), never over 100; with no
+//   cap to measure against, the full track.
+const MIN_OVER_PCT = 8;
 function budgetBar(spent, cap, projected, fixed) {
   const sp = Number(spent) || 0;
   const c = Number(cap) || 0;
   const proj = Math.max(Number(projected) || 0, sp);
   const clampPct = (v) => Math.max(0, Math.min(100, v));
-  if (!(c > 0)) return { leftPct: 0, tickPct: null, state: sp > 0.005 ? 'over' : 'ok' };
-  if (sp > c + 0.005) return { leftPct: 0, tickPct: null, state: 'over' };
+  if (!(c > 0)) return sp > 0.005 ? { leftPct: 0, tickPct: null, state: 'over', overPct: 100 } : { leftPct: 0, tickPct: null, state: 'ok', overPct: 0 };
+  if (sp > c + 0.005) return { leftPct: 0, tickPct: null, state: 'over', overPct: Math.min(100, Math.max(MIN_OVER_PCT, (sp - c) / c * 100)) };
   const leftPct = clampPct((c - sp) / c * 100);
-  if (proj > c + 1) return { leftPct, tickPct: fixed ? null : 0, state: 'heading' };
-  if (fixed) return { leftPct: sp >= c - 0.5 && sp > 0 ? 0 : leftPct, tickPct: null, state: sp >= c - 0.5 && sp > 0 ? 'paid' : 'ok' };
-  return { leftPct, tickPct: proj > sp + 0.5 ? clampPct((1 - proj / c) * 100) : null, state: 'ok' };
+  if (proj > c + 1) return { leftPct, tickPct: fixed ? null : 0, state: 'heading', overPct: 0 };
+  if (fixed) return { leftPct: sp >= c - 0.5 && sp > 0 ? 0 : leftPct, tickPct: null, state: sp >= c - 0.5 && sp > 0 ? 'paid' : 'ok', overPct: 0 };
+  return { leftPct, tickPct: proj > sp + 0.5 ? clampPct((1 - proj / c) * 100) : null, state: 'ok', overPct: 0 };
+}
+// "Can I spend this?" The day's opening figure (the daily figure before today's spending) minus
+// today's spend in budgeted envelopes: { left } floored at 0, or { over } when today already
+// passed the opening figure. Pure, in cents.
+function todayLeft(opening, budgetedToday) {
+  const diff = Math.round(((Number(opening) || 0) - (Number(budgetedToday) || 0)) * 100) / 100;
+  return { left: diff > 0 ? diff : 0, over: diff < 0 ? -diff : 0 };
 }
 
 function openAdd() { if (addAsSheet()) openAddSheet(); else { setTab('add'); window.scrollTo(0, 0); } }
@@ -793,22 +902,34 @@ function renderOverview() {
   const perDay = left / daysLeft;
   const tm = timeMode();
   const W = (v) => workStr(workTime(v, payPerHour));
-  // Today line. The hero's daily figure is computed AFTER today's spends, so it is
-  // never compared to them directly: when today touched budgeted envelopes, say
-  // what the day STARTED at, by undoing those spends with the hero's own sum
-  // (unclamped sum + today's budgeted spend, floored at 0 exactly as the hero floors).
-  // Today in a non-budgeted category leaves the figure untouched, so then just the spend.
+  // "Can I spend this?" The hero's daily figure is computed AFTER today's spends, so it is
+  // never compared to them directly: the day's OPENING figure undoes today's budgeted spends
+  // with the hero's own sum (unclamped sum + today's budgeted spend, floored at 0 exactly as
+  // the hero floors), and left-for-today is that opening figure minus those spends (todayLeft).
+  // Spending in a non-budgeted category leaves the figure untouched, so it never counts here.
+  // Not shown when the month's budget is used up (the red state) or with no usable "today".
   const tdy = todaySpend();
-  let todayText = '';
-  if (tdy) {
-    if (!tdy.any) todayText = 'Nothing logged today yet';
-    else if (bCats.length && tdy.budgeted > 0.005) {
-      const start = Math.max(0, rawLeft + tdy.budgeted) / daysLeft;
-      todayText = tm ? `Today ${W(tdy.spent)} of work &middot; started the day at ${W(start)}`
-        : `Today ${fmt(tdy.spent)} &middot; started the day at ${fmt(start)}`;
-    } else todayText = tm ? `Today ${W(tdy.spent)} of work` : `Today ${fmt(tdy.spent)} spent`;
+  const opening = tdy ? Math.max(0, rawLeft + tdy.budgeted) / daysLeft : 0;
+  const bare = (v) => (tm ? W(v) : fmt(v));
+  const money = (v) => (tm ? W(v) + ' of work' : fmt(v));
+  let tl1 = '', tl2 = '', tlWarn = false;
+  if (tdy && bCats.length && left > 0.005) {
+    const tlr = todayLeft(opening, tdy.budgeted);
+    if (tlr.over > 0.005) {
+      tl1 = `${money(tlr.over)} over today's ${bare(opening)}`;
+      tlWarn = true;
+    } else {
+      tl1 = `${money(tlr.left)} left for today`;
+      const outside = Math.round((tdy.spent - tdy.budgeted) * 100) / 100;
+      if (!tdy.any) tl2 = 'Nothing logged today yet';
+      else if (tdy.budgeted > 0.005) tl2 = `${money(tdy.budgeted)} spent of today's ${bare(opening)}` + (outside > 0.005 ? ` · ${money(outside)} outside the budgets` : '');
+      else if (tdy.spent > 0.005) tl2 = `${money(tdy.spent)} spent outside the budgets today`;
+      else tl2 = 'Nothing spent today yet';
+    }
   }
-  const todayLine = todayText ? `<div class="tdy">${todayText}</div>` : '';
+  const todayLine = tl1 ? `<div class="tdy"><div class="tl${tlWarn ? ' warn' : ''}">${esc(tl1)}</div>${tl2 ? `<div class="ts">${esc(tl2)}</div>` : ''}</div>` : '';
+  // No budgets in the sheet: just a plain line about today's spend.
+  const plainToday = tdy ? (!tdy.any ? 'Nothing logged today yet' : tm ? `Today ${W(tdy.spent)} of work` : `Today ${fmt(tdy.spent)} spent`) : '';
   const stale = staleCaptureText();
   const staleLine = stale ? `<div class="flag" id="staleFlag" role="button" tabindex="0" style="display:flex;align-items:center;min-height:44px;margin-top:12px" aria-label="${esc(stale + '. Open More to import')}">${esc(stale)} &rsaquo;</div>` : '';
 
@@ -841,7 +962,7 @@ function renderOverview() {
       const lower = `Already ${fmt(overTotal)} lower for overspent envelopes.`;
       st = { cls: 'amber', icon: ICON_WARN, h: 'Some envelopes are over', day: dayHtml, p: `${forDays}. ${lower}`, say: `${lower} ${keep}` };
     } else st = { cls: 'ok', icon: ICON_OK, h: 'You&rsquo;re on track', day: dayHtml, p: `${forDays}.`, say: keep };
-    const heroLabel = plainText(`Still free to spend ${heroAmt}, ${heroSub}. ${pd ? 'Next payday ' + pdWord + ', ' + pd.label + '. ' : ''}${st.h}. ${st.say} ${todayText}`);
+    const heroLabel = plainText(`Still free to spend ${heroAmt}, ${heroSub}. ${pd ? 'Next payday ' + pdWord + ', ' + pd.label + '. ' : ''}${st.h}. ${st.say} ${[tl1, tl2].filter(Boolean).join('. ')}`);
     hero = `<div class="hero" role="group" aria-label="${esc(heroLabel)}"><div aria-hidden="true" style="display:contents">
       <div class="top">${jarSvg('jarHome', pct, { text: true, animate: firstPaint, label: `Jar, ${pct} percent of this month's budget left` })}
         <div class="free"><div class="lab">Still free to spend</div><div id="bigTotal" style="font-size:${heroAmt.length >= 11 ? 24 : heroAmt.length >= 9 ? 28 : 34}px">${heroAmt}</div><div class="lab">${heroSub}</div></div></div>
@@ -851,10 +972,11 @@ function renderOverview() {
     // No budgets in the sheet (or an older one): just the month's total.
     hero = `<div class="hero"><div class="free"><div class="lab">Spent this month</div><div id="bigTotal">${fmt(data.totalMYR)}</div>
       <div class="lab">day ${data.dayOfMonth} of ${data.daysInMonth}</div></div>${paydayRow}
-      ${todayText ? `<div class="inrow stat ok"><div><div class="p" style="margin:0">${todayText}</div></div></div>` : ''}</div>${staleLine}`;
+      ${plainToday ? `<div class="inrow stat ok"><div><div class="p" style="margin:0">${esc(plainToday)}</div></div></div>` : ''}</div>${staleLine}`;
   }
-  let html = hero + `<div class="actions">
-    <button type="button" class="abtn gold" id="logBtn">${ICON_PLUS}Log spending</button>
+  // The visually hidden heading gives the hero (and the Tabung row after it) a place in the outline.
+  let html = '<h2 class="sr-only">This month</h2>' + hero + `<div class="actions">
+    <button type="button" class="abtn gold" id="logBtn">${ICON_PLUS}Log a spend</button>
     <button type="button" class="abtn mintb" id="shotsBtn">${ICON_SHOTS}Screenshots</button></div>`;
 
   const undo = pendingUndo();
@@ -898,18 +1020,24 @@ function renderOverview() {
         const bb = x.bb;
         const opts = { cat: x.c };
         // Bars drain: the fill is what is LEFT. Neutral while on track; orange when the month is
-        // heading over (projection passes the cap); overspent = an empty, faintly red track.
+        // heading over (projection passes the cap); overspent = a SOLID red bar whose length is
+        // the overspend as a share of the cap, on a red-tinted track; a paid fixed bill has no bar.
         let fill = 'var(--bar)';
-        if (bb.state === 'over') { opts.amtColor = 'var(--red)'; opts.trackCls = 'over'; }
+        if (bb.state === 'over') { fill = 'var(--red-bar)'; opts.amtColor = 'var(--red)'; opts.trackCls = 'over'; }
         else if (bb.state === 'heading') {
           fill = 'var(--amber-bar)';
           opts.amtColor = 'var(--amber)';
           opts.paceColor = 'var(--amber)';
           opts.paceText = `heading ${fmt(x.proj - x.cap)} over at this pace`;
-        } else if (bb.state === 'paid') opts.paceText = 'paid for the month'; // muted, not a warning
+        } else if (bb.state === 'paid') { // muted, not a warning: no track, a caption with a small check
+          opts.paceText = 'paid for the month';
+          opts.paceIcon = ICON_CHECK;
+          opts.paceCls = 'paid';
+          opts.noTrack = true;
+        }
         if (bb.tickPct !== null) opts.pacePct = bb.tickPct;
         const right = bb.state === 'over' ? `${fmt(x.s - x.cap)} over` : `${fmt(x.cap - x.s)} left`;
-        const w = bb.leftPct > 0 ? Math.max(2, Math.round(bb.leftPct)) : 0;
+        const w = bb.state === 'over' ? Math.round(bb.overPct) : bb.leftPct > 0 ? Math.max(2, Math.round(bb.leftPct)) : 0;
         return barRow(x.c, right, w, fill, opts);
       }).join('') + `</div>`;
   }
@@ -1088,7 +1216,7 @@ function renderSearch(q) {
 function txnRow(t, attr, longDate) {
   const inflow = t.amountMYR !== null && t.amountMYR < 0;
   return `<div class="txn tappable" role="button" tabindex="0" ${attr}>${catIcon(t.category)}<div style="min-width:0;flex:1"><div class="m">${esc(t.merchant || '(no merchant)')}</div>
-    <div class="sub">${esc(longDate ? fmtCoverageDate(t.date) : fmtDay(t.date))} &middot; ${esc(t.category)}${t.fronted ? ` &middot; <span style="color:var(--text);font-weight:600">fronted: ${esc(t.fronted)}</span>` : ''}</div></div>
+    <div class="sub">${esc(longDate ? fmtCoverageDate(t.date) : fmtDay(t.date))} &middot; ${esc(catLabel(t.category))}${t.fronted ? ` &middot; <span style="color:var(--text);font-weight:600">fronted: ${esc(t.fronted)}</span>` : ''}</div></div>
     <div class="val${inflow ? ' in' : ''}">${t.amountMYR === null ? '—' : (inflow ? '+' + fmt(-t.amountMYR) : fmt(t.amountMYR))}</div><span class="chev" aria-hidden="true">&rsaquo;</span></div>`;
 }
 
@@ -1154,12 +1282,12 @@ function monthItems(valueOf) {   // oldest first
     return { key: m, label: MONTHS[Number(p[1]) - 1], full: MONTH_NAMES[Number(p[1]) - 1] + ' ' + p[0], value: valueOf(hist[m], m) };
   });
 }
-function colChartHtml(id, items) {
+function colChartHtml(id, items, secondary) {
   if (!hasV47() || items.length < 2 || !items.some((x) => x.value > 0)) return '';
   const max = Math.max(...items.map((x) => x.value), 0.01);
   const avg = items.reduce((s, x) => s + x.value, 0) / items.length;
   const last = items.length - 1;
-  return `<div class="colchart" id="${id}">
+  return `<div class="colchart${secondary ? ' secondary' : ''}" id="${id}">
     <div class="readout"><div><span class="v num"></span><span class="l"></span></div><div class="avg">avg ${fmt(avg)} a month</div></div>
     <div class="extra"></div>
     <div class="plot" role="group" aria-label="Spending by month">${items.map((x, i) => `<button type="button" class="col" data-i="${i}" aria-pressed="${i === last}" aria-label="${esc(x.full)}: ${esc(fmt(x.value))}">
@@ -1228,11 +1356,11 @@ function openRecapSheet() {
       : versusPrev(c.delta, r.prevLabel).replace(/^the same as/, 'same as');
     const sub = [vs, typeof c.planned === 'number' ? 'planned ' + fmt(c.planned) : ''].filter(Boolean).join(' · ');
     const [cls, val] = money(c.amount);
-    return `<div class="txn">${catIcon(c.category)}<div style="min-width:0;flex:1"><div class="m">${esc(c.category)}</div>
+    return `<div class="txn">${catIcon(c.category)}<div style="min-width:0;flex:1"><div class="m">${esc(catLabel(c.category))}</div>
       ${sub ? `<div class="sub">${esc(sub)}</div>` : ''}</div><div class="${cls}">${val}</div></div>`;
   }).join('');
   const top = (r.top || []).map((t) => `<div class="txn">${catIcon(t.category)}<div style="min-width:0;flex:1">
-    <div class="m">${esc(t.merchant || '(no merchant)')}</div><div class="sub">${esc(fmtDay(t.date))} &middot; ${esc(t.category)}</div></div>
+    <div class="m">${esc(t.merchant || '(no merchant)')}</div><div class="sub">${esc(fmtDay(t.date))} &middot; ${esc(catLabel(t.category))}</div></div>
     <div class="val">${fmt(t.amountMYR)}</div></div>`).join('');
   const s = r.savings;
   const pot = (name, p) => p ? `<div class="txn"><div style="min-width:0;flex:1"><div class="m">${name}</div>
@@ -1273,9 +1401,11 @@ function openCategorySheet(cat) {
       }).join(' &middot; ')}</div>`
     : '';
   const chartItems = monthItems((h) => h[cat] || 0);
-  const chart = colChartHtml('catChart', chartItems);
-  const sheet = showSheet(`<h2 id="sheetTitle" style="margin:0;font-size:17px;font-weight:700">${esc(cat)}</h2>
-    <div class="muted" style="font-size:13px;margin-top:2px">${plural(rows.length, 'transaction')} this month &middot; ${fmt(total)}${cap ? ' of ' + fmt(cap) : ''}</div>${trend}${chart || histLine}
+  const chart = colChartHtml('catChart', chartItems, true);
+  // This month is the headline; the six-month chart is secondary, under "Earlier months".
+  const headline = `${fmt(total)}<span class="of"> ${cap ? 'of ' + fmt(cap) + ' ' : ''}this month</span>`;
+  const earlier = chart || histLine ? `<div class="fieldlabel">Earlier months</div>${chart || histLine}` : '';
+  const sheet = showSheet(`${sheetHead(esc(cat), headline, plural(rows.length, 'transaction'))}${trend}${earlier}
     <div style="margin-top:6px">${rows.length ? rows.map((t, i) => txnRow(t, 'data-mi="' + i + '"')).join('')
       : '<div class="muted" style="font-size:14px;padding:14px 0">Nothing yet this month.</div>'}</div>`);
   wireColChart(sheet, 'catChart', chartItems);
@@ -1384,9 +1514,10 @@ function fixAmountSheet(t, after) {
     <div style="margin-top:14px"><input type="text" inputmode="decimal" id="fixAmount" aria-labelledby="fixLabel" value="${Math.abs(t.amountMYR)}" autocomplete="off" style="background:var(--fill);font-size:20px;font-weight:700"></div>
     <button class="btn" id="fixSave">Save amount</button>`, 'Cancel');
   sheet.querySelector('#fixSave').addEventListener('click', async () => {
+    const bad = amountProblem($('fixAmount').value, { noun: 'the correct amount', example: '12.50' });
+    if (bad) return showFieldErrors([[$('fixAmount'), bad]]);
     const v = amountValue($('fixAmount').value);
-    if (!(v > 0)) return toast('Amount must be a number more than 0');
-    if (Math.abs(v - Math.abs(t.amountMYR)) < 0.005) return toast('Same as before');
+    if (Math.abs(v - Math.abs(t.amountMYR)) < 0.005) return showFieldErrors([[$('fixAmount'), 'Same as the amount now — type the corrected one']]);
     closeSheet();
     try {
       const r = await fixImported(t.id, String(v));
@@ -1404,7 +1535,7 @@ function fixAmountSheet(t, after) {
 // answer carried `ruleKeyword` adds a second toast action next to Undo.
 function ruleOffer(t, keyword, cat) {
   if (!keyword) return null;
-  return { label: `Always ${keyword} → ${cat}?`, run: () => offerRule(t, keyword, cat) };
+  return { label: `Always ${keyword} → ${catLabel(cat)}?`, run: () => offerRule(t, keyword, cat) };
 }
 async function offerRule(t, keyword, cat) {
   const yes = await confirmSheet(`Always put &ldquo;${esc(keyword)}&rdquo; in ${esc(cat)}?`,
@@ -1441,12 +1572,12 @@ async function recategorize(t, cat) {
       renderReview();
       updateBadge();
     }
-    toast(`${t.merchant || 'Row'} → ${cat}`, { label: 'Undo', run: async () => {
+    toast(`${t.merchant || 'Row'} → ${catLabel(cat)}`, { label: 'Undo', run: async () => {
       try {
         const u = await categorize(t.id, was || 'Uncategorized');
         if (!u.ok) throw new Error(u.error || 'rejected');
         t.category = was;
-        toast('Undone — back to ' + (was || 'Uncategorized'));
+        toast('Undone — back to ' + catLabel(was || 'Uncategorized'));
       } catch (err) { toast('Undo failed: ' + friendly(err)); }
       refresh();
     } }, ruleOffer(t, ruleKeyword, cat));
@@ -1464,8 +1595,8 @@ function openRowSheet(t, back) {
   const editBlock = editable ? `<button type="button" class="linkbtn" id="editToggle" aria-expanded="false" aria-controls="editBlock">Edit this quick-add &rsaquo;</button>
     <div id="editBlock" class="hidden">
     <div style="margin-top:4px"><input type="text" id="editMerchant" aria-label="Merchant" value="${esc(t.merchant || '')}" placeholder="Merchant" autocomplete="off" style="background:var(--fill)"></div>
-    <div style="display:flex;gap:10px;margin-top:8px">
-      <input type="text" inputmode="decimal" id="editAmount" aria-label="Amount (RM)" value="${t.amountMYR === null ? '' : Math.abs(t.amountMYR)}" placeholder="Amount (RM)" style="flex:1;background:var(--fill)" autocomplete="off">
+    <div id="editRow" style="display:flex;gap:10px;margin-top:8px">
+      <input type="text" inputmode="decimal" id="editAmount" aria-label="Amount (RM)" value="${t.amountMYR === null ? '' : Math.abs(t.amountMYR)}" placeholder="Amount (RM)" style="flex:1;background:var(--fill)" autocomplete="off" data-err-after="editRow">
       <input type="date" id="editDate" aria-label="Date" max="${localToday()}" value="${esc(t.date)}" style="flex:1;background:var(--fill)"></div>
     <button class="btn secondary" id="editSave">Save changes</button></div>` : '';
   const flag = freshImport(t) ? amountFlag(t) : null;
@@ -1476,18 +1607,17 @@ function openRowSheet(t, back) {
        ${t.amountMYR !== null ? '<button type="button" class="linkbtn" id="fixBtn">Fix amount &rsaquo;</button>' : ''}
        <button type="button" class="linkbtn" id="notRealBtn" style="color:var(--red)">Not real &mdash; remove it &rsaquo;</button>` : '';
   const inflow = t.amountMYR !== null && t.amountMYR < 0;
-  const amtHtml = t.amountMYR === null ? 'no amount' : inflow ? `<span class="amt-in">${fmtSigned(t.amountMYR)}</span>` : fmt(t.amountMYR);
+  const amtHtml = t.amountMYR === null ? '&mdash;' : inflow ? `<span class="amt-in">${fmtSigned(t.amountMYR)}</span>` : fmt(t.amountMYR);
   const unset = !t.category || !!NOT_PICKABLE[t.category];
   const catShown = unset ? 'not set yet' : NOT_SPEND_NAME[t.category] || t.category;
-  const sheet = mountSheet(`<h2 id="sheetTitle" style="margin:0;font-size:17px;font-weight:700">${esc(t.merchant || '(no merchant)')}</h2>
-    <div class="muted" style="font-size:13px;margin-top:2px">${esc(fmtDay(t.date))} &middot; ${amtHtml} &middot; ${esc(srcLabel(t.source))}</div>
+  const sheet = mountSheet(`${sheetHead(esc(t.merchant || '(no merchant)'), amtHtml, `${esc(fmtDay(t.date))} &middot; ${esc(srcLabel(t.source))}`)}
     <div class="catrow"><span class="cn">Category: <b>${esc(catShown)}</b></span>
       <button type="button" class="cbtn" id="catChange" aria-expanded="false" aria-controls="catReveal">${unset ? 'Choose' : 'Change'}</button></div>
     <div id="catReveal" class="hidden">
       <div class="chips cats" id="rowCats" role="group" aria-label="Category">${catChipsHtml(pickableCats(false),
         topCats([...(unset ? [] : [t.category]), ...(suggestCategory(t) ? [suggestCategory(t)] : [])]), t.category)}</div>
       <div class="fieldlabel" id="notSpendLabel" style="margin-top:18px">Not a spend</div>
-      <div class="chips stack" id="rowNot" role="group" aria-labelledby="notSpendLabel">${chipHtml('TRANSFER', t.category === 'TRANSFER', 'Transfer between my accounts')}${chipHtml('REFUND', t.category === 'REFUND', 'Refund / money back')}</div>
+      <div class="chips stack" id="rowNot" role="group" aria-labelledby="notSpendLabel">${chipHtml('TRANSFER', t.category === 'TRANSFER', NOT_SPEND_CHOICE.TRANSFER)}${chipHtml('REFUND', t.category === 'REFUND', NOT_SPEND_CHOICE.REFUND)}</div>
     </div>${removeBlock}${flippable(t)
       ? `<button type="button" class="linkbtn" id="flipBtn">Actually a ${t.amountMYR < 0 ? 'spend' : 'refund'}? Flip it &rsaquo;</button>` : ''}${editBlock}
     <button type="button" class="linkbtn" id="frontToggle" aria-expanded="${t.fronted ? 'true' : 'false'}" aria-controls="frontRow">${t.fronted ? 'Fronted for ' + esc(t.fronted) : (t.amountMYR !== null && t.amountMYR < 0 ? 'Repayment from someone?' : 'Paid this for someone?')} &rsaquo;</button>
@@ -1521,7 +1651,7 @@ function openRowSheet(t, back) {
     });
   });
   sheet.querySelectorAll('#catReveal button[data-c]').forEach((b) => b.addEventListener('click', () => {
-    if (b.dataset.c === t.category) return toast('Already ' + (NOT_SPEND_NAME[t.category] || t.category));
+    if (b.dataset.c === t.category) return toast('Already ' + catLabel(t.category));
     sheetOnClose = null;
     closeSheet();
     recategorize(t, b.dataset.c);
@@ -1541,7 +1671,7 @@ function openRowSheet(t, back) {
   };
   sheet.querySelector('#frontedSave').addEventListener('click', () => {
     const name = $('frontedName').value.replace(/[,;|]/g, ' ').replace(/\s+/g, ' ').trim();
-    if (!name) return toast('Type a name, or use Remove tag');
+    if (!name) return showFieldErrors([[$('frontedName'), 'Type a name, or use Remove tag']]);
     save(name);
   });
   const clear = sheet.querySelector('#frontedClear');
@@ -1556,10 +1686,13 @@ function openRowSheet(t, back) {
   if (editSave) {
     editSave.addEventListener('click', async () => {
       const merchant = $('editMerchant').value.trim();
-      const value = amountValue($('editAmount').value);
       const date = $('editDate').value;
-      if (!merchant) return toast('Merchant cannot be empty');
-      if (!(value > 0)) return toast('Amount must be a number more than 0');
+      const errs = [];
+      if (!merchant) errs.push([$('editMerchant'), 'Add a merchant name']);
+      const bad = amountProblem($('editAmount').value, { noun: 'an amount', example: '12.50' });
+      if (bad) errs.push([$('editAmount'), bad]);
+      if (errs.length) return showFieldErrors(errs);
+      const value = amountValue($('editAmount').value);
       const fields = {};
       if (merchant !== t.merchant) fields.merchant = merchant;
       const signed = t.amountMYR !== null && t.amountMYR < 0 ? -value : value; // keep a repayment negative
@@ -1586,11 +1719,19 @@ function runAudit() {
   const a = data.audit;
   // Two fields, summed here: the RHB and TnG apps each show one balance, so
   // nobody has to add them up in their head.
-  const rhb = amountValue($('auditRhb').value);
+  const rhbRaw = $('auditRhb').value;
   const tngRaw = $('auditTng').value.trim();
-  const tng = tngRaw ? amountValue(tngRaw) : 0;
   const out = $('auditOut');
-  if (!(rhb >= 0) || !(tng >= 0)) { out.innerHTML = ''; return toast('Type each balance as a number'); }
+  clearFieldError($('auditRhb'));
+  clearFieldError($('auditTng'));
+  const errs = [];
+  const badRhb = amountProblem(rhbRaw, { noun: 'your RHB balance', example: '1200.50', allowZero: true });
+  if (badRhb) errs.push([$('auditRhb'), badRhb]);
+  const badTng = tngRaw ? amountProblem(tngRaw, { noun: 'your TnG balance', example: '80.00', allowZero: true }) : null;
+  if (badTng) errs.push([$('auditTng'), badTng]);
+  if (errs.length) { out.innerHTML = ''; return showFieldErrors(errs); }
+  const rhb = amountValue(rhbRaw);
+  const tng = tngRaw ? amountValue(tngRaw) : 0;
   const real = Math.round((rhb + tng) * 100) / 100;
   const expected = Math.round((a.cashMYR + a.autologMYR + a.unbilledMYR) * 100) / 100;
   const gap = Math.round((real - expected) * 100) / 100;
@@ -1665,8 +1806,8 @@ function renderMore() {
   const group = (id, label, inner) => (inner ? `<div role="group" aria-labelledby="gl-${id}"><div class="grouplabel" id="gl-${id}">${label}</div>${inner}</div>` : '');
   html = group('insights', 'Insights', html) + group('tools', 'Tools', searchHtml + covHtml + auditHtml);
   html += `<div class="grouplabel" id="gl-settings">Settings</div><details class="card fold" id="moreFold"${moreFoldOpen ? ' open' : ''}><summary>Settings and how it works</summary>
-    <div class="muted" style="font-size:13px;margin-top:14px">Quick add opens as</div>
-    <div class="seg" style="margin-top:8px" role="group" aria-label="Quick add style">
+    <div class="muted" style="font-size:13px;margin-top:14px">Log a spend opens as</div>
+    <div class="seg" style="margin-top:8px" role="group" aria-label="Log a spend opens as">
       <button type="button" id="styleSheet" aria-pressed="${addAsSheet()}">Sheet over the screen</button>
       <button type="button" id="styleTab" aria-pressed="${!addAsSheet()}">Its own tab</button></div>
     <div class="muted" style="font-size:12px;margin-top:8px">Sheet: the keypad comes up at once and the screen behind stays put. Switch back here any time.</div>
@@ -1681,14 +1822,15 @@ function renderMore() {
     <div class="muted" style="font-size:12px;margin-top:8px">The day of the month you&rsquo;re paid, 1&ndash;31 (a shorter month uses its last day). Home counts down to it.</div>
     <div class="muted" style="font-size:13px;margin-top:18px" id="payLabelSet">Pay per hour (RM)</div>
     <div style="margin-top:8px"><input type="text" inputmode="decimal" id="payInput" aria-labelledby="payLabelSet" value="${payPerHour > 0 ? esc(String(payPerHour)) : ''}" placeholder="Not set" autocomplete="off" style="background:var(--fill)"></div>
-    <div class="muted" style="font-size:12px;margin-top:8px">Used by the Time button to show spending as days of your work (8-hour days). Stays on this phone, never sent anywhere. Clear it to turn Time off.</div>
+    <div class="muted" style="font-size:12px;margin-top:8px">Used by the Time button on Home to show spending as days of your work (8-hour days). Stays on this phone, never sent anywhere. Clear it to turn Time off.</div>
     <div class="muted" style="font-size:13px;margin-top:18px">How the numbers work</div>
     <ul class="muted" style="font-size:13px;line-height:1.55;margin:6px 0 0;padding-left:18px">
     <li><b style="color:var(--text)">Still free to spend</b> &mdash; what&rsquo;s left across every budgeted envelope; the daily figure under it divides that by the days left this month (today included). An overspent envelope counts against the others.</li>
+    <li><b style="color:var(--text)">Left for today</b> &mdash; the day&rsquo;s starting figure (the daily figure before today&rsquo;s spending) minus what you&rsquo;ve spent today in budgeted envelopes. Spending in an envelope without a budget doesn&rsquo;t count against it.</li>
     <li><b style="color:var(--text)">The jar</b> &mdash; filled to the share of this month&rsquo;s budget that is still left, and labelled &ldquo;left&rdquo;. It empties as you spend.</li>
-    <li><b style="color:var(--text)">Budget bars</b> &mdash; each bar is what&rsquo;s left of that envelope: full means untouched, empty means nothing left. Orange means this month is heading over; an empty bar with a red tint and &ldquo;over&rdquo; means it already is. A paid bill sits empty at the bottom. The thin bars under Other spending are only relative to the largest.</li>
+    <li><b style="color:var(--text)">Budget bars</b> &mdash; each bar is what&rsquo;s left of that envelope: full means untouched, empty means nothing left. Orange means this month is heading over; a solid red bar and &ldquo;over&rdquo; means it already is, and the longer the red bar, the further over (measured against the envelope&rsquo;s size). A paid bill has no bar, just &ldquo;paid for the month&rdquo;, at the bottom. The thin bars under Other spending are only relative to the largest.</li>
     <li><b style="color:var(--text)">Next payday</b> &mdash; counts down to the day of the month set above, from the date of the latest numbers.</li>
-    <li><b style="color:var(--text)">Tabung</b> &mdash; your savings pots, with the total on Home. Each jar and bar fills toward the pot&rsquo;s target, in gold because it&rsquo;s money; a pot with no target shows a full, faded jar. Travel Fund and the Emergency cushion take a target you set on this phone; the Buffer&rsquo;s target is its floor.</li>
+    <li><b style="color:var(--text)">Tabung</b> &mdash; your savings pots, with the total on Home. Each jar and bar fills toward the pot&rsquo;s target, in gold because it&rsquo;s money; a pot with no target shows a full jar in resting gold. Travel Fund and the Emergency cushion take a target you set on this phone; the Buffer&rsquo;s target is its floor.</li>
     <li><b style="color:var(--text)">Pace tick</b> &mdash; the small mark on a bar is where it will be at month end if you keep this pace; at the left edge, with &ldquo;heading RM20 over&rdquo;, the projection passes the cap.</li>
     <li><b style="color:var(--text)">The rules</b> &mdash; keyword rules in the sheet&rsquo;s Rules tab pick a category from the merchant name; anything they miss waits in Review.</li>
     <li><b style="color:var(--text)">Buffer floor</b> &mdash; the cushion for one-off shocks (the worst single month seen); salary above plan refills it before anything else.</li></ul></details>`;
@@ -1727,7 +1869,7 @@ function renderMore() {
     setAddStyle(v);
     $('styleSheet').setAttribute('aria-pressed', String(v === 'sheet'));
     $('styleTab').setAttribute('aria-pressed', String(v === 'tab'));
-    toast(v === 'sheet' ? 'Quick add now opens as a sheet' : 'Quick add now has its own tab');
+    toast(v === 'sheet' ? 'Log a spend now opens as a sheet' : 'Log a spend now has its own tab');
   }));
   [['themeAuto', 'auto', 'Auto'], ['themeLight', 'light', 'Light'], ['themeDark', 'dark', 'Dark']].forEach(([id, v, label]) => $(id).addEventListener('click', () => {
     themeSetting = v;
@@ -1842,8 +1984,9 @@ function openTargetSheet(key) {
     ${custom ? `<button class="btn quiet" id="tgtClear">${key === 'ef' ? 'Use the default' : 'Remove target'}</button>` : ''}`, 'Cancel');
   const done = (msg) => { saveTargets(); closeSheet(); renderPots(); renderOverview(); toast(msg); };
   sheet.querySelector('#tgtSave').addEventListener('click', () => {
+    const bad = amountProblem($('tgtInput').value, { noun: 'a target', example: '5000' });
+    if (bad) return showFieldErrors([[$('tgtInput'), bad]]);
     const v = amountValue($('tgtInput').value);
-    if (!(v > 0)) return toast('Target must be a number more than 0');
     potTargets[key] = v;
     done(`${p.name} target saved`);
   });
@@ -1860,6 +2003,10 @@ function syncHeaderBtns() {
   hb.setAttribute('aria-label', hideOn ? 'Show amounts' : 'Hide amounts');
   hb.title = hideOn ? 'Show amounts' : 'Hide amounts';
   $('timeBtn').setAttribute('aria-pressed', String(timeMode()));
+  // Time and the eye belong to Home; the amounts stay hidden everywhere while the setting is on,
+  // only the buttons go. The title row keeps its height (the Refresh button is always there).
+  hb.classList.toggle('hidden', tab !== 'overview');
+  $('timeBtn').classList.toggle('hidden', tab !== 'overview');
 }
 // Everything that draws money re-renders from the current snapshot (open sheets sit
 // behind an inert page, so a toggle never happens under one).
@@ -1893,8 +2040,9 @@ function openPaySheet() {
     <div style="margin-top:14px"><input type="text" inputmode="decimal" id="paySheetInput" aria-labelledby="payLabel" placeholder="e.g. 30" autocomplete="off" style="background:var(--fill);font-size:20px;font-weight:800"></div>
     <button class="btn" id="paySave">Save</button>`, 'Cancel');
   const save = () => {
+    const bad = amountProblem($('paySheetInput').value, { noun: 'your pay per hour', example: '30' });
+    if (bad) return showFieldErrors([[$('paySheetInput'), bad]]);
     const v = amountValue($('paySheetInput').value);
-    if (!(v > 0)) return toast('Pay must be a number more than 0');
     payPerHour = v;
     timeOn = true;
     prefSet(PREF.pay, v);
@@ -1922,9 +2070,9 @@ function renderReview() {
   let html = '';
   if (!list.length) {
     html = `<div class="card" style="text-align:center;padding:34px 16px">
-      <div style="font-size:40px">🎉</div>
+      <div class="emptyico">${ICON_OK}</div>
       <div style="font-size:17px;font-weight:700;margin-top:8px">Nothing to review</div>
-      <div class="muted" style="font-size:14px;margin-top:4px">Every transaction is categorised &mdash; all clear to sync to Actual Budget.</div></div>`;
+      <div class="muted" style="font-size:14px;margin-top:4px">Everything has a category and will sync to Actual.</div></div>`;
   } else {
     html = `<div class="card list"><h2>
       <span>Needs a category</span>
@@ -1934,7 +2082,7 @@ function renderReview() {
         ${reviewSelectMode ? `<span class="selbox" aria-hidden="true"><span class="selmark${reviewSel.has(t.id) ? ' on' : ''}"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.4l2.6 2.6L11 4.4"/></svg></span></span>` : catIcon(suggestCategory(t) || t.category)}
         <div style="min-width:0;flex:1">
         <div class="m">${esc(t.merchant || '(no merchant)')}</div>
-        <div class="sub">${esc(fmtDay(t.date))} &middot; ${esc(srcLabel(t.source))}${t.category === 'REVIEW' ? ' &middot; REVIEW' : ''}${(() => { const g = suggestCategory(t); return g ? ` &middot; <span style="color:var(--text);font-weight:600">maybe ${esc(g)}</span>` : ''; })()}</div></div>
+        <div class="sub">${esc(fmtDay(t.date))} &middot; ${esc(srcLabel(t.source))}${t.category === 'DUPLICATE?' ? ' &middot; possible duplicate' : ''}${(() => { const g = suggestCategory(t); return g ? ` &middot; <span style="color:var(--text);font-weight:600">maybe ${esc(g)}</span>` : ''; })()}</div></div>
         <div class="val">${t.amountMYR === null ? '—' : fmt(t.amountMYR)}</div>${reviewSelectMode ? '' : '<span class="chev" aria-hidden="true">&rsaquo;</span>'}</div>`).join('') +
       '</div>' +
       (reviewSelectMode && reviewSel.size
@@ -1980,7 +2128,7 @@ function openSheet(txns) {
   const head = many
     ? `${txns.length} transactions`
     : esc(t0.merchant || '(no merchant)');
-  const amount = many ? '' : `<div class="num" style="font-size:30px;font-weight:800;letter-spacing:-.6px;margin-top:4px${t0.amountMYR !== null && t0.amountMYR < 0 ? ';color:var(--green)' : ''}">${t0.amountMYR === null ? '&mdash;' : fmtSigned(t0.amountMYR)}</div>`;
+  const amount = many ? '' : t0.amountMYR === null ? '&mdash;' : t0.amountMYR < 0 ? `<span class="amt-in">${fmtSigned(t0.amountMYR)}</span>` : fmtSigned(t0.amountMYR);
   const sub = many
     ? 'one category for all of them'
     : `${esc(fmtDay(t0.date))} &middot; ${esc(srcLabel(t0.source))}`;
@@ -1988,8 +2136,7 @@ function openSheet(txns) {
   const suggChip = suggested
     ? `<button type="button" class="sugg" data-c="${esc(suggested)}" aria-pressed="false" aria-label="${esc('Suggested: ' + suggested + '. This merchant is ' + suggested + ' elsewhere')}"><span class="ci" aria-hidden="true">${catOf(suggested)[0]}</span>Maybe ${esc(suggested)}</button>
        <div class="chipsep" aria-hidden="true">Suggested &mdash; this merchant is ${esc(suggested)} elsewhere</div>` : '';
-  const sheet = mountSheet(`<h2 id="sheetTitle" style="margin:0;font-size:17px;font-weight:700">${head}</h2>${amount}
-    <div class="muted" style="font-size:13px;margin-top:${many ? 2 : 4}px">${sub}</div>
+  const sheet = mountSheet(`${sheetHead(head, amount, sub)}
     <div class="chips cats" id="catPick" role="group" aria-label="Category">${suggChip}${catChipsHtml(suggested ? cats.filter((c) => c !== suggested) : cats, topCats([]), null)}</div>
     <div class="muted" style="font-size:12px;margin-top:10px">New envelopes appear here once they&rsquo;re funded in Actual.</div>`, 'Cancel');
   const holder = sheet.querySelector('#catPick');
@@ -2040,8 +2187,8 @@ async function applyCategory(txns, cat) {
   }
   // Undo (10s, paused while focused): put each row back to the category it had (Uncategorized/REVIEW).
   const undo = done.length ? { label: 'Undo', run: () => undoCategory(done) } : null;
-  if (lastErr) toast(`${done.length}/${txns.length} → ${cat} · last error: ${friendly(lastErr)}`, undo);
-  else toast(many ? `${done.length} transactions → ${cat}` : `${txns[0].merchant || 'Row'} → ${cat}`, undo, many ? null : ruleOffer(txns[0], ruleKeyword, cat));
+  if (lastErr) toast(`${done.length}/${txns.length} → ${catLabel(cat)} · last error: ${friendly(lastErr)}`, undo);
+  else toast(many ? `${done.length} transactions → ${catLabel(cat)}` : `${txns[0].merchant || 'Row'} → ${catLabel(cat)}`, undo, many ? null : ruleOffer(txns[0], ruleKeyword, cat));
   if (done.length) refresh(); // Overview spend + the >100-row review tail catch up
 }
 
@@ -2137,7 +2284,7 @@ function updateBadge() {
   pill.setAttribute('aria-label', n ? `${n} to review — open Review` : 'All clear — open Review');
 }
 
-const TAB_TITLES = { overview: 'Spending', pots: 'Tabung', review: 'Review', add: 'Log spending', more: 'More' };
+const TAB_TITLES = { overview: 'Spending', pots: 'Tabung', review: 'Review', add: 'Log a spend', more: 'More' };
 function setTab(t) {
   if (t !== tab) dismissActionToast(); // an Undo / rule offer belongs to the screen it was raised on
   tab = t;
@@ -2148,6 +2295,7 @@ function setTab(t) {
     if (t === v) $('tab-' + v).setAttribute('aria-current', 'page'); else $('tab-' + v).removeAttribute('aria-current');
   });
   updateBadge(); // the header pill hides on the Review tab
+  syncHeaderBtns(); // Time + the eye show on Home only
   window.scrollTo(0, 0);
   healViewport();
 }
@@ -2163,9 +2311,10 @@ function setAddMode(mode) {
   addMode = mode;
   $('modeSpend').setAttribute('aria-pressed', String(mode === 'spend'));
   $('modePaid').setAttribute('aria-pressed', String(mode === 'paid'));
+  clearFieldErrors($('addForm')); // the wording differs per mode
   $('addTitle').textContent = addPaid() ? 'Log a repayment' : 'Log a spend';
   $('addSave').textContent = addSaveLabel();
-  $('addMerchant').placeholder = addPaid() ? 'What for, e.g. Ali dinner' : 'Merchant';
+  $('addMerchant').placeholder = addPaid() ? 'What for (optional), e.g. Ali dinner' : 'Merchant';
   $('catLabel').textContent = addPaid() ? 'Envelope you paid it from — required' : 'Category — optional, the rules decide';
   $('frontLabel').textContent = addPaid() ? 'Who paid you back?' : 'Paid for someone? (optional)';
   // Paid back starts with "who": picking the name fills amount, label and
@@ -2247,6 +2396,7 @@ function fillAddChips(select) {
       if (!was) { b.classList.add('sel'); b.setAttribute('aria-pressed', 'true'); } // tap again = let the rules decide
     });
   });
+  if (selectedAddCat()) clearFieldError(holder); // an envelope was filled in for them
 }
 
 // Name chips: people who owe you (both modes). In Paid back, a name also
@@ -2274,6 +2424,8 @@ function fillNameChips() {
       const last = (data.monthRows || []).filter((t) => t.fronted && t.fronted.toLowerCase() === f.name.toLowerCase() && t.amountMYR > 0)[0];
       if (last && !selectedAddCat()) fillAddChips(last.category);
     }
+    // Whatever the name just filled in is no longer missing.
+    ['addFronted', 'addAmount', 'addMerchant'].forEach((id) => { if ($(id).value.trim()) clearFieldError($(id)); });
   }));
 }
 
@@ -2307,6 +2459,7 @@ function fillRecentChips() {
       $('addCurrency').value = 'MYR';
       $('addFronted').value = t.fronted || '';
       fillAddChips(t.category); // any category, even one outside the chip pool (Family)
+      clearFieldErrors($('addForm'));
       toast('Prefilled — adjust and log');
     });
   });
@@ -2545,24 +2698,26 @@ function addSaveLabel() {
 }
 
 async function saveQuickAdd() {
-  const merchant = $('addMerchant').value.trim();
-  const value = amountValue($('addAmount').value);
   const paidback = addPaid();
-  if (!merchant) return toast('Give it a merchant name');
-  if (!(value > 0)) return toast('Amount must be a number more than 0');
-  const amount = String(value); // normalized, so the backend stores exactly what the toast shows
   const cat = selectedAddCat();
-  // A repayment nets a specific envelope, so the category is not optional —
-  // the backend rejects category-less negatives too (they'd sync wrong).
-  if (paidback && !cat) return toast('Pick the envelope the repayment nets');
-  const fields = { merchant, amount: paidback ? '-' + amount : amount, currency: $('addCurrency').value };
-  if (cat) fields.category = cat;
   // The Notes cell: free note + the "fronted: <name>" tag the Owed tracker reads
   // (same sanitising as setFrontedTag: , ; | would split the tag).
   const who = $('addFronted').value.replace(/[,;|]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 30);
+  // Problems appear under their own fields (page order), focus on the first. A repayment nets a
+  // specific envelope, so its category is required (the backend rejects category-less negatives
+  // too); its "what for" is optional and defaults to "Repayment - name".
+  clearFieldErrors($('addForm'));
+  const errs = addErrors({ amount: $('addAmount').value, merchant: $('addMerchant').value, paid: paidback, who, cat,
+    hasNames: !$('nameChips').classList.contains('hidden') });
+  if ($('addDate').value && $('addDate').value > localToday()) errs.push({ id: 'addDate', msg: 'That date is in the future' });
+  if (errs.length) return showFieldErrors(errs.map((e) => [$(e.id), e.msg]));
+  const value = amountValue($('addAmount').value);
+  const merchant = $('addMerchant').value.trim();
+  const amount = String(value); // normalized, so the backend stores exactly what the toast shows
+  const fields = { merchant, amount: paidback ? '-' + amount : amount, currency: $('addCurrency').value };
+  if (cat) fields.category = cat;
   const note = [$('addNote').value.trim(), who ? 'fronted: ' + who : ''].filter(Boolean).join('; ');
   if (note) fields.note = note;
-  if ($('addDate').value && $('addDate').value > localToday()) return toast('That date is in the future');
   // Only send a date when it isn't today, so "now" keeps its time of day (dedup ordering).
   if ($('addDate').value && $('addDate').value !== localToday()) fields.date = $('addDate').value;
   const btn = $('addSave');
@@ -2769,6 +2924,6 @@ if (typeof module !== 'undefined') module.exports = {
   parseConnect, snapToday, staleCaptureText, todaySpend, paceColor, barColor, amountFlag, importFlag, flippable,
   monthItems, monthTotalItems, versusPrev, suggestCategory, topCats, canonCats, pickableCats, srcLabel, fmtUpdated,
   workDays, workTime, fmtDays, migratePay, resolveTheme, PREF, nextPayday, potsFor, fmtWhole, maskText,
-  budgetBar, jarWaterY, kbInset, fmtSigned,
+  budgetBar, todayLeft, amountProblem, addErrors, catLabel, jarWaterY, kbInset, fmtSigned,
   CANON_CATS, __setData: (d) => { data = d; }, __setHide: (v) => { hideOn = !!v; }
 };
